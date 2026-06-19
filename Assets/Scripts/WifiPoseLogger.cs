@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Globalization;
 using UnityEngine;
 
 #if UNITY_ANDROID && !UNITY_EDITOR
@@ -9,6 +10,8 @@ using UnityEngine.Android;
 public class WifiPoseLogger : MonoBehaviour
 {
     public Transform centerEyeAnchor;
+    public Transform anchorTransform;
+
     public string fileName = "rf_trajectory_log.csv";
     public float sampleIntervalSeconds = 1.0f;
 
@@ -21,56 +24,54 @@ public class WifiPoseLogger : MonoBehaviour
 
     void Start()
     {
+        Debug.LogError("WIFI_POSE_LOGGER_START_REACHED");
+
         filePath = Path.Combine(Application.persistentDataPath, fileName);
 
-        File.WriteAllText(
-            filePath,
-            "timestamp_unix_ms,pos_x,pos_y,pos_z,rot_x,rot_y,rot_z,rot_w,ssid,bssid,rssi_dbm,frequency_mhz,link_speed_mbps\n"
-        );
+        string header =
+            "timestamp_unix_ms," +
+            "world_pos_x,world_pos_y,world_pos_z," +
+            "world_rot_x,world_rot_y,world_rot_z,world_rot_w," +
+            "anchor_pos_x,anchor_pos_y,anchor_pos_z," +
+            "anchor_rot_x,anchor_rot_y,anchor_rot_z,anchor_rot_w," +
+            "ssid,bssid,rssi_dbm,frequency_mhz,link_speed_mbps\n";
 
-        Debug.Log("WifiPoseLogger writing to: " + filePath);
-
-        if (centerEyeAnchor == null)
-        {
-            Debug.LogError("WifiPoseLogger: centerEyeAnchor is not assigned.");
-        }
+        File.WriteAllText(filePath, header);
+        Debug.LogError("WIFI_POSE_LOGGER_FILE_CREATED: " + filePath);
 
 #if UNITY_ANDROID && !UNITY_EDITOR
-        // Wi-Fi SSID/BSSID access may require location permission on Android.
-        if (!Permission.HasUserAuthorizedPermission(Permission.FineLocation))
+        try
         {
-            Permission.RequestUserPermission(Permission.FineLocation);
-            Debug.Log("WifiPoseLogger requested Fine Location permission.");
+            using (AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
+            using (AndroidJavaObject activity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
+            {
+                wifiManager = activity.Call<AndroidJavaObject>("getSystemService", "wifi");
+            }
+
+            if (!Permission.HasUserAuthorizedPermission(Permission.FineLocation))
+            {
+                Permission.RequestUserPermission(Permission.FineLocation);
+            }
+
+            if (!Permission.HasUserAuthorizedPermission(Permission.CoarseLocation))
+            {
+                Permission.RequestUserPermission(Permission.CoarseLocation);
+            }
         }
-
-        AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
-        AndroidJavaObject activity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity");
-        AndroidJavaObject appContext = activity.Call<AndroidJavaObject>("getApplicationContext");
-
-        AndroidJavaClass contextClass = new AndroidJavaClass("android.content.Context");
-        string wifiService = contextClass.GetStatic<string>("WIFI_SERVICE");
-
-        wifiManager = appContext.Call<AndroidJavaObject>("getSystemService", wifiService);
-
-        if (wifiManager == null)
+        catch (Exception e)
         {
-            Debug.LogError("WifiPoseLogger: wifiManager is null.");
-        }
-        else
-        {
-            Debug.Log("WifiPoseLogger: wifiManager initialized.");
+            Debug.LogError("WIFI_POSE_LOGGER_ANDROID_INIT_FAILED: " + e);
         }
 #endif
     }
 
     void Update()
     {
-        if (centerEyeAnchor == null) return;
-
-        timer += Time.deltaTime;
+        timer += Time.unscaledDeltaTime;
 
         if (timer >= sampleIntervalSeconds)
         {
+            Debug.LogError("WIFI_POSE_LOGGER_TIMER_PASSED");
             timer = 0f;
             LogWifiAndPose();
         }
@@ -78,10 +79,31 @@ public class WifiPoseLogger : MonoBehaviour
 
     void LogWifiAndPose()
     {
+        Debug.LogError("WIFI_POSE_LOGGER_ROW_ATTEMPT");
+
+        if (centerEyeAnchor == null)
+        {
+            Debug.LogError("WIFI_POSE_LOGGER_NO_CENTER_EYE_ANCHOR");
+            return;
+        }
+
         long timestampMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-        Vector3 p = centerEyeAnchor.position;
-        Quaternion q = centerEyeAnchor.rotation;
+        Vector3 worldPos = centerEyeAnchor.position;
+        Quaternion worldRot = centerEyeAnchor.rotation;
+
+        Vector3 anchorPos = Vector3.zero;
+        Quaternion anchorRot = Quaternion.identity;
+
+        if (anchorTransform != null)
+        {
+            anchorPos = anchorTransform.position;
+            anchorRot = anchorTransform.rotation;
+        }
+        else
+        {
+            Debug.LogError("WIFI_POSE_LOGGER_NO_ANCHOR_TRANSFORM");
+        }
 
         string ssid = "UNKNOWN";
         string bssid = "UNKNOWN";
@@ -94,44 +116,65 @@ public class WifiPoseLogger : MonoBehaviour
         {
             if (wifiManager != null)
             {
-                AndroidJavaObject wifiInfo = wifiManager.Call<AndroidJavaObject>("getConnectionInfo");
-
-                if (wifiInfo != null)
+                using (AndroidJavaObject wifiInfo = wifiManager.Call<AndroidJavaObject>("getConnectionInfo"))
                 {
-                    ssid = wifiInfo.Call<string>("getSSID");
-                    bssid = wifiInfo.Call<string>("getBSSID");
-                    rssi = wifiInfo.Call<int>("getRssi");
-                    frequency = wifiInfo.Call<int>("getFrequency");
-                    linkSpeed = wifiInfo.Call<int>("getLinkSpeed");
+                    if (wifiInfo != null)
+                    {
+                        ssid = wifiInfo.Call<string>("getSSID");
+                        bssid = wifiInfo.Call<string>("getBSSID");
+                        rssi = wifiInfo.Call<int>("getRssi");
+                        frequency = wifiInfo.Call<int>("getFrequency");
+                        linkSpeed = wifiInfo.Call<int>("getLinkSpeed");
+                    }
                 }
+            }
+            else
+            {
+                Debug.LogError("WIFI_POSE_LOGGER_WIFI_MANAGER_NULL");
             }
         }
         catch (Exception e)
         {
-            Debug.LogError("WifiPoseLogger Wi-Fi read failed: " + e.Message);
+            Debug.LogError("WIFI_POSE_LOGGER_WIFI_READ_FAILED: " + e);
         }
-#else
-        ssid = "EDITOR_FAKE_SSID";
-        bssid = "EDITOR_FAKE_BSSID";
-        rssi = -50;
-        frequency = 5200;
-        linkSpeed = 100;
 #endif
 
-        string cleanSsid = CleanCsv(ssid);
-        string cleanBssid = CleanCsv(bssid);
+        string line =
+            timestampMs + "," +
+            F(worldPos.x) + "," + F(worldPos.y) + "," + F(worldPos.z) + "," +
+            F(worldRot.x) + "," + F(worldRot.y) + "," + F(worldRot.z) + "," + F(worldRot.w) + "," +
+            F(anchorPos.x) + "," + F(anchorPos.y) + "," + F(anchorPos.z) + "," +
+            F(anchorRot.x) + "," + F(anchorRot.y) + "," + F(anchorRot.z) + "," + F(anchorRot.w) + "," +
+            Csv(ssid) + "," +
+            Csv(bssid) + "," +
+            rssi + "," +
+            frequency + "," +
+            linkSpeed + "\n";
 
-        string row =
-            $"{timestampMs},{p.x},{p.y},{p.z},{q.x},{q.y},{q.z},{q.w},{cleanSsid},{cleanBssid},{rssi},{frequency},{linkSpeed}\n";
-
-        File.AppendAllText(filePath, row);
-
-        Debug.Log($"WifiPoseLogger row: RSSI={rssi}, SSID={ssid}, BSSID={bssid}");
+        try
+        {
+            File.AppendAllText(filePath, line);
+            Debug.LogError("WIFI_POSE_LOGGER_APPEND_SUCCESS: " + line);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError("WIFI_POSE_LOGGER_APPEND_FAILED: " + e);
+        }
     }
 
-    string CleanCsv(string input)
+    string F(float value)
     {
-        if (string.IsNullOrEmpty(input)) return "UNKNOWN";
-        return input.Replace(",", "_").Replace("\n", "").Replace("\r", "");
+        return value.ToString("F6", CultureInfo.InvariantCulture);
+    }
+
+    string Csv(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return "UNKNOWN";
+        }
+
+        value = value.Replace("\"", "\"\"");
+        return "\"" + value + "\"";
     }
 }
