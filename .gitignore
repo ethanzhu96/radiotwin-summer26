@@ -2,6 +2,18 @@
 #
 # Get latest from https://github.com/github/gitignore/blob/main/Unity.gitignore
 #
+
+# Data and generated outputs
+data/
+outputs/
+*.csv
+
+# Python local files
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
 .utmp/
 /[Ll]ibrary/
 /[Tt]emp/
@@ -73,3 +85,9 @@ crashlytics-build.properties
 # Temporary auto-generated Android Assets
 /[Aa]ssets/[Ss]treamingAssets/aa.meta
 /[Aa]ssets/[Ss]treamingAssets/aa/*
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
