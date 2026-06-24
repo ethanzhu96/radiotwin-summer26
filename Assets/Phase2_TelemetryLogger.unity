@@ -763,7 +763,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::WifiPoseLogger
   centerEyeAnchor: {fileID: 126266618}
   anchorTransform: {fileID: 1995644374}
-  fileName: rf_trajectory_log.csv
+  fileName: iperf_1hz.csv
   sampleIntervalSeconds: 1
 --- !u!4 &1399133874
 Transform:

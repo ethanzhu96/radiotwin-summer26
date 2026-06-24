@@ -12,7 +12,7 @@ public class WifiPoseLogger : MonoBehaviour
     public Transform centerEyeAnchor;
     public Transform anchorTransform;
 
-    public string fileName = "rf_trajectory_log.csv";
+    public string fileName = "iperf_1hz.csv";
     public float sampleIntervalSeconds = 1.0f;
 
     private string filePath;
