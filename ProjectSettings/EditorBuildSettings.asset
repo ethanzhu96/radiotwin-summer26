@@ -5,9 +5,12 @@ EditorBuildSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 2
   m_Scenes:
-  - enabled: 1
+  - enabled: 0
     path: Assets/Scenes/Phase2_TelemetryLogger.unity
     guid: 1ba002eb89085784d9a3194186ccf38d
+  - enabled: 1
+    path: Assets/anchor.unity
+    guid: c1320736ca2ab584c95531eded10c496
   m_configObjects:
     Unity.XR.Oculus.Settings: {fileID: 11400000, guid: 369444be5272e5a499a7d59ad820bef6, type: 2}
     com.unity.xr.management.loader_settings: {fileID: 11400000, guid: 1e5223617db9f3d4db24d58ea58297d8, type: 2}
