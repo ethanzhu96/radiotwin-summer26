@@ -15,7 +15,7 @@ public class TxLineOfSightVisualizer : MonoBehaviour
         public float posY;
         public float posZ;
         public float rotX;
-        public float rotY;
+        public float rotY; 
         public float rotZ;
         public float rotW;
     }
