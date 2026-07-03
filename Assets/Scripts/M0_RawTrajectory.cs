@@ -9,6 +9,7 @@ public class M0_RawTrajectory : MonoBehaviour
     public string fileName = "rf_trajectory_log.csv";
 
     [Header("Points")]
+    public float visualScale = 1f;
     public float pointRadius = 0.05f;
     public float minRssi = -70f;
     public float maxRssi = -40f;
@@ -146,8 +147,8 @@ public class M0_RawTrajectory : MonoBehaviour
             point.name = "M0_RSSI_POINT_" + i + "_" + sample.rssi.ToString("F1", CultureInfo.InvariantCulture);
 
             point.transform.SetParent(transform, false);
-            point.transform.position = sample.position;
-            point.transform.localScale = Vector3.one * pointRadius * 2f;
+            point.transform.position = sample.position * visualScale;
+            point.transform.localScale = Vector3.one * pointRadius * visualScale * 2f;
 
             Collider collider = point.GetComponent<Collider>();
             if (collider != null)
@@ -187,7 +188,7 @@ public class M0_RawTrajectory : MonoBehaviour
         lineRenderer.enabled = true;
         lineRenderer.useWorldSpace = false;
         lineRenderer.positionCount = samples.Count;
-        lineRenderer.widthMultiplier = Mathf.Max(lineWidth, 0.001f);
+        lineRenderer.widthMultiplier = Mathf.Max(lineWidth * visualScale, 0.001f);
         lineRenderer.material = CreateTransparentMaterial();
         lineRenderer.material.color = GetLineColor();
 
@@ -203,7 +204,7 @@ public class M0_RawTrajectory : MonoBehaviour
 
         for (int i = 0; i < samples.Count; i++)
         {
-            lineRenderer.SetPosition(i, transform.InverseTransformPoint(samples[i].position));
+            lineRenderer.SetPosition(i, transform.InverseTransformPoint(samples[i].position * visualScale));
         }
     }
 

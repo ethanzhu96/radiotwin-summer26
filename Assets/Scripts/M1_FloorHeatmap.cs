@@ -12,6 +12,7 @@ public class RssiFloorHeatmap : MonoBehaviour
     [Header("Grid Settings")]
     public float cellSize = 0.5f;
     public float floorY = 0.01f;
+    public float visualScale = 1f;
 
     [Header("RSSI Normalization")]
     public float minRssi = -70f;
@@ -130,8 +131,9 @@ public class RssiFloorHeatmap : MonoBehaviour
             Vector2Int cell = kvp.Key;
             float avgRssi = kvp.Value.Average();
 
-            float x = (cell.x + 0.5f) * cellSize;
-            float z = (cell.y + 0.5f) * cellSize;
+            float scaledCellSize = cellSize * visualScale;
+            float x = (cell.x + 0.5f) * scaledCellSize;
+            float z = (cell.y + 0.5f) * scaledCellSize;
 
             GameObject tile = GameObject.CreatePrimitive(PrimitiveType.Quad);
             tile.name = $"RSSI_TILE_{cell.x}_{cell.y}_avg_{avgRssi:F1}";
@@ -139,7 +141,7 @@ public class RssiFloorHeatmap : MonoBehaviour
             tile.transform.parent = transform;
             tile.transform.position = new Vector3(x, floorY, z);
             tile.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
-            tile.transform.localScale = new Vector3(cellSize, cellSize, 1f);
+            tile.transform.localScale = new Vector3(scaledCellSize, scaledCellSize, 1f);
 
             Collider collider = tile.GetComponent<Collider>();
             if (collider != null)

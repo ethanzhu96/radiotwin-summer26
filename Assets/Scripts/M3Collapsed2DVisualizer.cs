@@ -26,6 +26,7 @@ public class M3Collapsed2DVisualizer : MonoBehaviour
     public float semanticHeightCenter = 1.1f;
     public float semanticHeightSigma = 0.45f;
     public float floorY = 0.01f;
+    public float visualScale = 1f;
 
     [Header("RSSI")]
     public float minRssi = -70f;
@@ -318,8 +319,9 @@ public class M3Collapsed2DVisualizer : MonoBehaviour
             Vector2Int cell = kvp.Key;
             float collapsedRssi = kvp.Value.Average();
 
-            float x = (cell.x + 0.5f) * voxelSize;
-            float z = (cell.y + 0.5f) * voxelSize;
+            float scaledVoxelSize = voxelSize * visualScale;
+            float x = (cell.x + 0.5f) * scaledVoxelSize;
+            float z = (cell.y + 0.5f) * scaledVoxelSize;
 
             GameObject tile = GameObject.CreatePrimitive(PrimitiveType.Quad);
             tile.name = "M3_COLLAPSED_TILE_" + cell.x + "_" + cell.y + "_avg_" + collapsedRssi.ToString("F1", CultureInfo.InvariantCulture);
@@ -327,7 +329,7 @@ public class M3Collapsed2DVisualizer : MonoBehaviour
             tile.transform.SetParent(transform, false);
             tile.transform.position = new Vector3(x, floorY, z);
             tile.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
-            tile.transform.localScale = new Vector3(voxelSize, voxelSize, 1f);
+            tile.transform.localScale = new Vector3(scaledVoxelSize, scaledVoxelSize, 1f);
 
             Collider collider = tile.GetComponent<Collider>();
             if (collider != null)

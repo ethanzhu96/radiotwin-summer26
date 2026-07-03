@@ -12,11 +12,12 @@ public class M2HeightBarVisualizer : MonoBehaviour
     [Header("Grid Settings")]
     public float cellSize = 0.5f;
     public float floorY = 0.01f;
+    public float visualScale = 1f;
 
     [Header("Bar Settings")]
     public float minBarHeight = 0.05f;
     public float maxBarHeight = 1.5f;
-    public float barWidthScale = 0.85f;
+    public float barWidthScale = 1f;
     public float alpha = 0.85f;
 
     [Header("Rendering")]
@@ -179,8 +180,9 @@ public class M2HeightBarVisualizer : MonoBehaviour
             Vector2Int cell = kvp.Key;
             float avgRssi = kvp.Value.Average();
 
-            float x = (cell.x + 0.5f) * cellSize;
-            float z = (cell.y + 0.5f) * cellSize;
+            float scaledCellSize = cellSize * visualScale;
+            float x = (cell.x + 0.5f) * scaledCellSize;
+            float z = (cell.y + 0.5f) * scaledCellSize;
 
             CreateBar(cell, new Vector3(x, floorY, z), avgRssi);
         }
@@ -189,7 +191,7 @@ public class M2HeightBarVisualizer : MonoBehaviour
     private void CreateBar(Vector2Int cell, Vector3 floorCenter, float rssi)
     {
         float t = NormalizeRssi(rssi);
-        float height = Mathf.Lerp(minBarHeight, maxBarHeight, t);
+        float height = Mathf.Lerp(minBarHeight, maxBarHeight, t) * visualScale;
 
         GameObject bar = GameObject.CreatePrimitive(PrimitiveType.Cube);
         bar.name = "M2_BAR_" + cell.x + "_" + cell.y + "_avg_" + rssi.ToString("F1", CultureInfo.InvariantCulture);
@@ -197,9 +199,9 @@ public class M2HeightBarVisualizer : MonoBehaviour
         bar.transform.SetParent(transform, false);
         bar.transform.position = new Vector3(floorCenter.x, floorY + height / 2f, floorCenter.z);
         bar.transform.localScale = new Vector3(
-            cellSize * barWidthScale,
+            cellSize * visualScale * barWidthScale,
             height,
-            cellSize * barWidthScale
+            cellSize * visualScale * barWidthScale
         );
 
         Collider collider = bar.GetComponent<Collider>();

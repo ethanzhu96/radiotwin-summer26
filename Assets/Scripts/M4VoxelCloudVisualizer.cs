@@ -10,6 +10,7 @@ public class M4VoxelCloudVisualizer : MonoBehaviour
 
     [Header("Voxel Grid")]
     public float voxelSize = 0.5f;
+    public float visualScale = 1f;
     public float verticalMinY = 0f;
     public float verticalMaxY = 2f;
     public int maxVoxels = 5000;
@@ -216,8 +217,8 @@ public class M4VoxelCloudVisualizer : MonoBehaviour
         voxel.name = "M4_VOXEL_RSSI_" + rssi.ToString("F1", CultureInfo.InvariantCulture);
 
         voxel.transform.SetParent(transform, false);
-        voxel.transform.position = center;
-        voxel.transform.localScale = Vector3.one * voxelSize;
+        voxel.transform.position = center * visualScale;
+        voxel.transform.localScale = Vector3.one * voxelSize * visualScale;
 
         Collider collider = voxel.GetComponent<Collider>();
         if (collider != null)
