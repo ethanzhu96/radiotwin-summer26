@@ -2,15 +2,24 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using UnityEngine;
+using Meta.XR.MRUtilityKit;
 
 public class M0_RawTrajectory : MonoBehaviour
 {
+    public enum RenderFrameMode
+    {
+        SerializedParent,
+        LiveMRUKRoom
+    }
+
     [Header("CSV")]
     public string fileName = "rf_trajectory_log.csv";
 
     [Header("Coordinate Frame")]
+    public RenderFrameMode renderFrameMode = RenderFrameMode.LiveMRUKRoom;
     public Transform coordinateFrameRoot;
     public bool inputPositionsAreMeshLocal = true;
+    public bool parentToMRUKRoomAtRuntime = true;
 
     [Header("Alignment Nudge")]
     public Vector3 positionOffset = Vector3.zero;
@@ -37,8 +46,10 @@ public class M0_RawTrajectory : MonoBehaviour
     }
 
     private bool csvPositionsAreMeshLocal = false;
+    private string csvAnchorName = "";
     private float lastAppliedYawOffsetDegrees;
     private Vector3 lastAppliedPositionOffset;
+    private Transform lastResolvedCoordinateFrameRoot;
 
     void Start()
     {
@@ -54,7 +65,8 @@ public class M0_RawTrajectory : MonoBehaviour
         }
 
         if (!Mathf.Approximately(yawOffsetDegrees, lastAppliedYawOffsetDegrees) ||
-            positionOffset != lastAppliedPositionOffset)
+            positionOffset != lastAppliedPositionOffset ||
+            ResolveCoordinateFrameRoot())
         {
             GenerateRawTrajectory();
             RememberAppliedAlignment();
@@ -99,8 +111,22 @@ public class M0_RawTrajectory : MonoBehaviour
         Debug.Log(
             "M0_RawTrajectory: Generated " + samples.Count +
             " raw trajectory points. yawOffsetDegrees=" + yawOffsetDegrees.ToString("F2", CultureInfo.InvariantCulture) +
-            ", positionOffset=" + positionOffset
+            ", positionOffset=" + positionOffset +
+            ", coordinateFrameRoot=" + (coordinateFrameRoot != null ? coordinateFrameRoot.name : "none") +
+            ", csvAnchorName=" + (string.IsNullOrEmpty(csvAnchorName) ? "none" : csvAnchorName)
         );
+
+        if (renderFrameMode == RenderFrameMode.LiveMRUKRoom &&
+            coordinateFrameRoot != null &&
+            !string.IsNullOrEmpty(csvAnchorName) &&
+            csvAnchorName != coordinateFrameRoot.name)
+        {
+            Debug.LogWarning(
+                "M0_RawTrajectory: CSV was logged against '" + csvAnchorName +
+                "' but current render frame is '" + coordinateFrameRoot.name +
+                "'. If this is the live passthrough scene, M0 can be offset from the EffectMesh."
+            );
+        }
     }
 
     private void RememberAppliedAlignment()
@@ -127,7 +153,9 @@ public class M0_RawTrajectory : MonoBehaviour
         int zIndex = FindColumn(headers, "anchor_local_z", "local_pos_z", "pos_z", "world_pos_z");
         int rssiIndex = FindColumn(headers, "rssi_dbm", "rssi", "rssiDbm");
         int anchorSourceIndex = FindColumn(headers, "anchor_source");
+        int anchorNameIndex = FindColumn(headers, "anchor_name");
         csvPositionsAreMeshLocal = false;
+        csvAnchorName = "";
 
         if (xIndex < 0 || yIndex < 0 || zIndex < 0 || rssiIndex < 0)
         {
@@ -179,6 +207,11 @@ public class M0_RawTrajectory : MonoBehaviour
                 {
                     csvPositionsAreMeshLocal = true;
                 }
+            }
+
+            if (anchorNameIndex >= 0 && cols.Length > anchorNameIndex && string.IsNullOrEmpty(csvAnchorName))
+            {
+                csvAnchorName = cols[anchorNameIndex].Trim().Replace("\"", "");
             }
 
             SignalSample sample = new SignalSample
@@ -285,11 +318,40 @@ public class M0_RawTrajectory : MonoBehaviour
         return Quaternion.Euler(0f, yawOffsetDegrees, 0f) * modeLocalPosition + positionOffset;
     }
 
-    private void ResolveCoordinateFrameRoot()
+    private bool ResolveCoordinateFrameRoot()
     {
+        Transform previousRoot = coordinateFrameRoot;
+
+        if (renderFrameMode == RenderFrameMode.LiveMRUKRoom &&
+            MRUK.Instance != null &&
+            MRUK.Instance.GetCurrentRoom() != null)
+        {
+            coordinateFrameRoot = MRUK.Instance.GetCurrentRoom().transform;
+
+            if (parentToMRUKRoomAtRuntime && Application.isPlaying && transform.parent != coordinateFrameRoot)
+            {
+                transform.SetParent(coordinateFrameRoot, false);
+                transform.localPosition = Vector3.zero;
+                transform.localRotation = Quaternion.identity;
+                transform.localScale = Vector3.one;
+                Debug.Log("M0_RawTrajectory: Parent set to MRUK room frame: " + coordinateFrameRoot.name);
+            }
+
+            bool changedToMRUK = previousRoot != coordinateFrameRoot || lastResolvedCoordinateFrameRoot != coordinateFrameRoot;
+            lastResolvedCoordinateFrameRoot = coordinateFrameRoot;
+            return changedToMRUK;
+        }
+
+        if (renderFrameMode == RenderFrameMode.LiveMRUKRoom)
+        {
+            lastResolvedCoordinateFrameRoot = coordinateFrameRoot;
+            return previousRoot != coordinateFrameRoot;
+        }
+
         if (coordinateFrameRoot != null)
         {
-            return;
+            lastResolvedCoordinateFrameRoot = coordinateFrameRoot;
+            return previousRoot != coordinateFrameRoot;
         }
 
         GameObject roomAnchor = GameObject.Find("RoomAnchor");
@@ -299,6 +361,10 @@ public class M0_RawTrajectory : MonoBehaviour
             coordinateFrameRoot = roomAnchor.transform;
             Debug.Log("M0_RawTrajectory: Auto-assigned coordinateFrameRoot to RoomAnchor.");
         }
+
+        bool changed = previousRoot != coordinateFrameRoot || lastResolvedCoordinateFrameRoot != coordinateFrameRoot;
+        lastResolvedCoordinateFrameRoot = coordinateFrameRoot;
+        return changed;
     }
 
     private GradientColorKey[] BuildLineColorKeys(List<SignalSample> samples)

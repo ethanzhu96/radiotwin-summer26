@@ -556,6 +556,8 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 83524993}
+  - component: {fileID: 83524994}
+  - component: {fileID: 83524995}
   m_Layer: 0
   m_Name: VisualizationModes
   m_TagString: Untagged
@@ -583,6 +585,42 @@ Transform:
   - {fileID: 987844182}
   m_Father: {fileID: 1995644374}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &83524994
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 83524992}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 527411e27c3a6e440a601d2f074f39f1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::VisualizationModeManager
+  m0RawTrajectoryParent: {fileID: 1133723838}
+  m1FloorTilesParent: {fileID: 804694690}
+  m2HeightBarsParent: {fileID: 1197049694}
+  m3Collapsed2DParent: {fileID: 2047081625}
+  m4VoxelCloudParent: {fileID: 987844181}
+  currentMode: 0
+  regenerateOnModeSwitch: 1
+  regenerateKey: 114
+  lastRegenerateStatus: Never regenerated.
+--- !u!114 &83524995
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 83524992}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6d79d423aa9d46f4f9e87b4d70e20d3b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PassthroughBootstrap
+  enableOnStart: 1
+  forceTransparentCameraBackground: 1
+  addPassthroughLayerIfMissing: 1
 --- !u!1 &84544122
 GameObject:
   m_ObjectHideFlags: 0
@@ -3207,74 +3245,62 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 815843358}
     m_Modifications:
-    - target: {fileID: -8679921383154817045, guid: 2ff7ba5b24def1c4f94675b77f3f4e5c, type: 3}
-      propertyPath: m_LocalScale.x
+    - target: {fileID: 5404810939612788652, guid: cfd1821174bd9a748bddbcdb6bd74d40, type: 3}
+      propertyPath: m_Name
+      value: quest_room_mesh_generated
+      objectReference: {fileID: 0}
+    - target: {fileID: 5404810939612788652, guid: cfd1821174bd9a748bddbcdb6bd74d40, type: 3}
+      propertyPath: m_IsActive
       value: 1
       objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: 2ff7ba5b24def1c4f94675b77f3f4e5c, type: 3}
-      propertyPath: m_LocalScale.y
-      value: 1
-      objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: 2ff7ba5b24def1c4f94675b77f3f4e5c, type: 3}
-      propertyPath: m_LocalScale.z
-      value: 1
-      objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: 2ff7ba5b24def1c4f94675b77f3f4e5c, type: 3}
+    - target: {fileID: 6295606367178308072, guid: cfd1821174bd9a748bddbcdb6bd74d40, type: 3}
       propertyPath: m_LocalPosition.x
       value: 0
       objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: 2ff7ba5b24def1c4f94675b77f3f4e5c, type: 3}
+    - target: {fileID: 6295606367178308072, guid: cfd1821174bd9a748bddbcdb6bd74d40, type: 3}
       propertyPath: m_LocalPosition.y
       value: 0
       objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: 2ff7ba5b24def1c4f94675b77f3f4e5c, type: 3}
+    - target: {fileID: 6295606367178308072, guid: cfd1821174bd9a748bddbcdb6bd74d40, type: 3}
       propertyPath: m_LocalPosition.z
       value: 0
       objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: 2ff7ba5b24def1c4f94675b77f3f4e5c, type: 3}
+    - target: {fileID: 6295606367178308072, guid: cfd1821174bd9a748bddbcdb6bd74d40, type: 3}
       propertyPath: m_LocalRotation.w
       value: 1
       objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: 2ff7ba5b24def1c4f94675b77f3f4e5c, type: 3}
+    - target: {fileID: 6295606367178308072, guid: cfd1821174bd9a748bddbcdb6bd74d40, type: 3}
       propertyPath: m_LocalRotation.x
       value: -0
       objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: 2ff7ba5b24def1c4f94675b77f3f4e5c, type: 3}
+    - target: {fileID: 6295606367178308072, guid: cfd1821174bd9a748bddbcdb6bd74d40, type: 3}
       propertyPath: m_LocalRotation.y
       value: -0
       objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: 2ff7ba5b24def1c4f94675b77f3f4e5c, type: 3}
+    - target: {fileID: 6295606367178308072, guid: cfd1821174bd9a748bddbcdb6bd74d40, type: 3}
       propertyPath: m_LocalRotation.z
       value: -0
       objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: 2ff7ba5b24def1c4f94675b77f3f4e5c, type: 3}
+    - target: {fileID: 6295606367178308072, guid: cfd1821174bd9a748bddbcdb6bd74d40, type: 3}
       propertyPath: m_LocalEulerAnglesHint.x
       value: 0
       objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: 2ff7ba5b24def1c4f94675b77f3f4e5c, type: 3}
+    - target: {fileID: 6295606367178308072, guid: cfd1821174bd9a748bddbcdb6bd74d40, type: 3}
       propertyPath: m_LocalEulerAnglesHint.y
       value: 0
       objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: 2ff7ba5b24def1c4f94675b77f3f4e5c, type: 3}
+    - target: {fileID: 6295606367178308072, guid: cfd1821174bd9a748bddbcdb6bd74d40, type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 919132149155446097, guid: 2ff7ba5b24def1c4f94675b77f3f4e5c, type: 3}
-      propertyPath: m_Name
-      value: quest_room_mesh
-      objectReference: {fileID: 0}
-    - target: {fileID: 919132149155446097, guid: 2ff7ba5b24def1c4f94675b77f3f4e5c, type: 3}
-      propertyPath: m_IsActive
-      value: 1
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
     m_AddedComponents: []
-  m_SourcePrefab: {fileID: 100100000, guid: 2ff7ba5b24def1c4f94675b77f3f4e5c, type: 3}
+  m_SourcePrefab: {fileID: 100100000, guid: cfd1821174bd9a748bddbcdb6bd74d40, type: 3}
 --- !u!4 &783669913 stripped
 Transform:
-  m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: 2ff7ba5b24def1c4f94675b77f3f4e5c, type: 3}
+  m_CorrespondingSourceObject: {fileID: 6295606367178308072, guid: cfd1821174bd9a748bddbcdb6bd74d40, type: 3}
   m_PrefabInstance: {fileID: 720348752}
   m_PrefabAsset: {fileID: 0}
 --- !u!1 &804694690
@@ -3293,7 +3319,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &804694691
 Transform:
   m_ObjectHideFlags: 0
@@ -3323,7 +3349,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::RssiFloorHeatmap
   fileName: rf_trajectory_log.csv
   coordinateFrameRoot: {fileID: 1995644374}
-  inputPositionsAreMeshLocal: 1
   cellSize: 0.5
   floorY: 0.01
   minRssi: -70
@@ -3429,7 +3454,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &815843358
 Transform:
   m_ObjectHideFlags: 0
@@ -4402,7 +4427,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::M4VoxelCloudVisualizer
   fileName: rf_trajectory_log.csv
   coordinateFrameRoot: {fileID: 1995644374}
-  inputPositionsAreMeshLocal: 1
   voxelSize: 0.5
   verticalMinY: 0
   verticalMaxY: 2
@@ -5080,9 +5104,13 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::M0_RawTrajectory
   fileName: rf_trajectory_log.csv
+  renderFrameMode: 1
   coordinateFrameRoot: {fileID: 1995644374}
   inputPositionsAreMeshLocal: 1
-  drawSamplePoints: 0
+  parentToMRUKRoomAtRuntime: 1
+  positionOffset: {x: 0, y: 0, z: 0}
+  yawOffsetDegrees: 0
+  drawSamplePoints: 1
   pointRadius: 0.05
   minRssi: -70
   maxRssi: -40
@@ -5358,7 +5386,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::M2HeightBarVisualizer
   fileName: rf_trajectory_log.csv
   coordinateFrameRoot: {fileID: 1995644374}
-  inputPositionsAreMeshLocal: 1
   cellSize: 0.5
   floorY: 0.01
   minBarHeight: 0.05
@@ -7554,7 +7581,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::M3Collapsed2DVisualizer
   fileName: rf_trajectory_log.csv
   coordinateFrameRoot: {fileID: 1995644374}
-  inputPositionsAreMeshLocal: 1
   voxelSize: 0.5
   verticalMinY: 0
   verticalMaxY: 2
