@@ -9,10 +9,12 @@ public class RssiFloorHeatmap : MonoBehaviour
     [Header("CSV")]
     public string fileName = "rf_trajectory_log.csv";
 
+    [Header("Coordinate Frame")]
+    public Transform coordinateFrameRoot;
+
     [Header("Grid Settings")]
     public float cellSize = 0.5f;
     public float floorY = 0.01f;
-    public float visualScale = 1f;
 
     [Header("RSSI Normalization")]
     public float minRssi = -70f;
@@ -42,6 +44,14 @@ public class RssiFloorHeatmap : MonoBehaviour
 
     void Start()
     {
+        GenerateFloorHeatmap();
+    }
+
+    [ContextMenu("Regenerate Floor Heatmap")]
+    public void GenerateFloorHeatmap()
+    {
+        ResolveCoordinateFrameRoot();
+
         if (clearOldTilesOnStart)
         {
             ClearOldTiles();
@@ -79,16 +89,13 @@ public class RssiFloorHeatmap : MonoBehaviour
 
         string[] headers = lines[0].Split(',');
 
-        int ix = Array.IndexOf(headers, "pos_x");
-        int iz = Array.IndexOf(headers, "pos_z");
+        int ix = FindColumn(headers, "anchor_local_x", "local_pos_x", "pos_x", "world_pos_x");
+        int iz = FindColumn(headers, "anchor_local_z", "local_pos_z", "pos_z", "world_pos_z");
         int irssi = Array.IndexOf(headers, "rssi_dbm");
-
-        if (ix < 0) ix = Array.IndexOf(headers, "world_pos_x");
-        if (iz < 0) iz = Array.IndexOf(headers, "world_pos_z");
 
         if (ix < 0 || iz < 0 || irssi < 0)
         {
-            Debug.LogError("CSV missing required columns. Need pos_x,pos_z,rssi_dbm or world_pos_x/world_pos_z/rssi_dbm.");
+            Debug.LogError("CSV missing required columns. Need anchor_local_x/anchor_local_z/rssi_dbm, pos_x/pos_z/rssi_dbm, or world_pos_x/world_pos_z/rssi_dbm.");
             Debug.LogError("Headers found: " + string.Join(" | ", headers));
             return grid;
         }
@@ -131,17 +138,16 @@ public class RssiFloorHeatmap : MonoBehaviour
             Vector2Int cell = kvp.Key;
             float avgRssi = kvp.Value.Average();
 
-            float scaledCellSize = cellSize * visualScale;
-            float x = (cell.x + 0.5f) * scaledCellSize;
-            float z = (cell.y + 0.5f) * scaledCellSize;
+            float x = (cell.x + 0.5f) * cellSize;
+            float z = (cell.y + 0.5f) * cellSize;
 
             GameObject tile = GameObject.CreatePrimitive(PrimitiveType.Quad);
             tile.name = $"RSSI_TILE_{cell.x}_{cell.y}_avg_{avgRssi:F1}";
 
-            tile.transform.parent = transform;
-            tile.transform.position = new Vector3(x, floorY, z);
-            tile.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
-            tile.transform.localScale = new Vector3(scaledCellSize, scaledCellSize, 1f);
+            tile.transform.SetParent(transform, false);
+            tile.transform.localPosition = ToModeLocalPosition(new Vector3(x, floorY, z));
+            tile.transform.localRotation = ToModeLocalRotation(Quaternion.Euler(90f, 0f, 0f));
+            tile.transform.localScale = new Vector3(cellSize, cellSize, 1f);
 
             Collider collider = tile.GetComponent<Collider>();
             if (collider != null)
@@ -181,8 +187,76 @@ public class RssiFloorHeatmap : MonoBehaviour
 
         foreach (GameObject child in children)
         {
-            Destroy(child);
+            if (Application.isPlaying)
+            {
+                Destroy(child);
+            }
+            else
+            {
+                DestroyImmediate(child);
+            }
         }
+    }
+
+    int FindColumn(string[] headers, params string[] possibleNames)
+    {
+        for (int i = 0; i < headers.Length; i++)
+        {
+            string cleanedHeader = CleanHeader(headers[i]);
+
+            foreach (string possibleName in possibleNames)
+            {
+                if (cleanedHeader == CleanHeader(possibleName))
+                {
+                    return i;
+                }
+            }
+        }
+
+        return -1;
+    }
+
+    string CleanHeader(string s)
+    {
+        return s.Trim().Replace("\"", "").ToLowerInvariant();
+    }
+
+    Vector3 ToModeLocalPosition(Vector3 coordinateFrameLocalPosition)
+    {
+        if (coordinateFrameRoot == null)
+        {
+            return coordinateFrameLocalPosition;
+        }
+
+        Vector3 worldPosition = coordinateFrameRoot.TransformPoint(coordinateFrameLocalPosition);
+        return transform.InverseTransformPoint(worldPosition);
+    }
+
+    void ResolveCoordinateFrameRoot()
+    {
+        if (coordinateFrameRoot != null)
+        {
+            return;
+        }
+
+        GameObject roomAnchor = GameObject.Find("RoomAnchor");
+
+        if (roomAnchor != null)
+        {
+            coordinateFrameRoot = roomAnchor.transform;
+            Debug.Log("RssiFloorHeatmap: Auto-assigned coordinateFrameRoot to RoomAnchor.");
+        }
+    }
+
+    Quaternion ToModeLocalRotation(Quaternion coordinateFrameLocalRotation)
+    {
+        if (coordinateFrameRoot == null)
+        {
+            return coordinateFrameLocalRotation;
+        }
+
+        Quaternion worldRotation = coordinateFrameRoot.rotation * coordinateFrameLocalRotation;
+        return Quaternion.Inverse(transform.rotation) * worldRotation;
     }
 
     float ParseFloat(string s)

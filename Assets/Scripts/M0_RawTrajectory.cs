@@ -8,8 +8,16 @@ public class M0_RawTrajectory : MonoBehaviour
     [Header("CSV")]
     public string fileName = "rf_trajectory_log.csv";
 
+    [Header("Coordinate Frame")]
+    public Transform coordinateFrameRoot;
+    public bool inputPositionsAreMeshLocal = true;
+
+    [Header("Alignment Nudge")]
+    public Vector3 positionOffset = Vector3.zero;
+    public float yawOffsetDegrees = 0f;
+
     [Header("Points")]
-    public float visualScale = 1f;
+    public bool drawSamplePoints = false;
     public float pointRadius = 0.05f;
     public float minRssi = -70f;
     public float maxRssi = -40f;
@@ -28,15 +36,36 @@ public class M0_RawTrajectory : MonoBehaviour
         public float rssi;
     }
 
+    private bool csvPositionsAreMeshLocal = false;
+    private float lastAppliedYawOffsetDegrees;
+    private Vector3 lastAppliedPositionOffset;
+
     void Start()
     {
         GenerateRawTrajectory();
+        RememberAppliedAlignment();
+    }
+
+    void Update()
+    {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        if (!Mathf.Approximately(yawOffsetDegrees, lastAppliedYawOffsetDegrees) ||
+            positionOffset != lastAppliedPositionOffset)
+        {
+            GenerateRawTrajectory();
+            RememberAppliedAlignment();
+        }
     }
 
     [ContextMenu("Regenerate Raw Trajectory")]
     public void GenerateRawTrajectory()
     {
         ClearChildren();
+        ResolveCoordinateFrameRoot();
 
         string path = Path.Combine(Application.persistentDataPath, fileName);
 
@@ -59,10 +88,25 @@ public class M0_RawTrajectory : MonoBehaviour
             return;
         }
 
-        CreatePoints(samples);
+        if (drawSamplePoints)
+        {
+            CreatePoints(samples);
+        }
+
         UpdatePathLine(samples);
 
-        Debug.Log("M0_RawTrajectory: Generated " + samples.Count + " raw trajectory points.");
+        RememberAppliedAlignment();
+        Debug.Log(
+            "M0_RawTrajectory: Generated " + samples.Count +
+            " raw trajectory points. yawOffsetDegrees=" + yawOffsetDegrees.ToString("F2", CultureInfo.InvariantCulture) +
+            ", positionOffset=" + positionOffset
+        );
+    }
+
+    private void RememberAppliedAlignment()
+    {
+        lastAppliedYawOffsetDegrees = yawOffsetDegrees;
+        lastAppliedPositionOffset = positionOffset;
     }
 
     private List<SignalSample> LoadSamples(string path)
@@ -78,14 +122,16 @@ public class M0_RawTrajectory : MonoBehaviour
 
         string[] headers = SplitCsvLine(lines[0]);
 
-        int xIndex = FindColumn(headers, "world_pos_x", "pos_x");
-        int yIndex = FindColumn(headers, "world_pos_y", "pos_y");
-        int zIndex = FindColumn(headers, "world_pos_z", "pos_z");
+        int xIndex = FindColumn(headers, "anchor_local_x", "local_pos_x", "pos_x", "world_pos_x");
+        int yIndex = FindColumn(headers, "anchor_local_y", "local_pos_y", "pos_y", "world_pos_y");
+        int zIndex = FindColumn(headers, "anchor_local_z", "local_pos_z", "pos_z", "world_pos_z");
         int rssiIndex = FindColumn(headers, "rssi_dbm", "rssi", "rssiDbm");
+        int anchorSourceIndex = FindColumn(headers, "anchor_source");
+        csvPositionsAreMeshLocal = false;
 
         if (xIndex < 0 || yIndex < 0 || zIndex < 0 || rssiIndex < 0)
         {
-            Debug.LogError("M0_RawTrajectory: CSV missing required columns. Need world_pos_x/world_pos_y/world_pos_z or pos_x/pos_y/pos_z and rssi_dbm.");
+            Debug.LogError("M0_RawTrajectory: CSV missing required columns. Need anchor_local_x/anchor_local_y/anchor_local_z, pos_x/pos_y/pos_z, or world_pos_x/world_pos_y/world_pos_z and rssi_dbm.");
             Debug.LogError("M0_RawTrajectory headers found: " + string.Join(" | ", headers));
             return samples;
         }
@@ -125,6 +171,16 @@ public class M0_RawTrajectory : MonoBehaviour
                 continue;
             }
 
+            if (anchorSourceIndex >= 0 && cols.Length > anchorSourceIndex)
+            {
+                string anchorSource = CleanHeader(cols[anchorSourceIndex]);
+
+                if (anchorSource == "mruk")
+                {
+                    csvPositionsAreMeshLocal = true;
+                }
+            }
+
             SignalSample sample = new SignalSample
             {
                 position = new Vector3(x, y, z),
@@ -147,8 +203,8 @@ public class M0_RawTrajectory : MonoBehaviour
             point.name = "M0_RSSI_POINT_" + i + "_" + sample.rssi.ToString("F1", CultureInfo.InvariantCulture);
 
             point.transform.SetParent(transform, false);
-            point.transform.position = sample.position * visualScale;
-            point.transform.localScale = Vector3.one * pointRadius * visualScale * 2f;
+            point.transform.localPosition = ToModeLocalPosition(sample.position);
+            point.transform.localScale = Vector3.one * pointRadius * 2f;
 
             Collider collider = point.GetComponent<Collider>();
             if (collider != null)
@@ -188,7 +244,7 @@ public class M0_RawTrajectory : MonoBehaviour
         lineRenderer.enabled = true;
         lineRenderer.useWorldSpace = false;
         lineRenderer.positionCount = samples.Count;
-        lineRenderer.widthMultiplier = Mathf.Max(lineWidth * visualScale, 0.001f);
+        lineRenderer.widthMultiplier = Mathf.Max(lineWidth, 0.001f);
         lineRenderer.material = CreateTransparentMaterial();
         lineRenderer.material.color = GetLineColor();
 
@@ -204,7 +260,44 @@ public class M0_RawTrajectory : MonoBehaviour
 
         for (int i = 0; i < samples.Count; i++)
         {
-            lineRenderer.SetPosition(i, transform.InverseTransformPoint(samples[i].position * visualScale));
+            lineRenderer.SetPosition(i, ToModeLocalPosition(samples[i].position));
+        }
+    }
+
+    private Vector3 ToModeLocalPosition(Vector3 coordinateFrameLocalPosition)
+    {
+        Vector3 modeLocalPosition;
+
+        if (inputPositionsAreMeshLocal || csvPositionsAreMeshLocal)
+        {
+            modeLocalPosition = coordinateFrameLocalPosition;
+        }
+        else if (coordinateFrameRoot == null)
+        {
+            modeLocalPosition = coordinateFrameLocalPosition;
+        }
+        else
+        {
+            Vector3 worldPosition = coordinateFrameRoot.TransformPoint(coordinateFrameLocalPosition);
+            modeLocalPosition = transform.InverseTransformPoint(worldPosition);
+        }
+
+        return Quaternion.Euler(0f, yawOffsetDegrees, 0f) * modeLocalPosition + positionOffset;
+    }
+
+    private void ResolveCoordinateFrameRoot()
+    {
+        if (coordinateFrameRoot != null)
+        {
+            return;
+        }
+
+        GameObject roomAnchor = GameObject.Find("RoomAnchor");
+
+        if (roomAnchor != null)
+        {
+            coordinateFrameRoot = roomAnchor.transform;
+            Debug.Log("M0_RawTrajectory: Auto-assigned coordinateFrameRoot to RoomAnchor.");
         }
     }
 

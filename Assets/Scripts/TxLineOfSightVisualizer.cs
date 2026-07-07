@@ -22,6 +22,20 @@ public class TxLineOfSightVisualizer : MonoBehaviour
 
     [Header("Placement")]
     public Transform placementSource;
+    public Transform trackingSpace;
+    public bool useOVRControllerPose = true;
+    public OVRInput.Controller placementController = OVRInput.Controller.RTouch;
+    public bool autoUseControllerPlacementSource = true;
+    public bool allowHeadsetPlacementFallback = false;
+    public string[] controllerPlacementSourceNames =
+    {
+        "RightControllerInHandAnchor",
+        "RightHandOnControllerAnchor",
+        "RightHandAnchor",
+        "RightHandAnchorDetached",
+        "LeftControllerInHandAnchor",
+        "LeftHandOnControllerAnchor"
+    };
     public GameObject txMarkerPrefab;
     public float forwardOffsetMeters = 0.25f;
 
@@ -33,6 +47,7 @@ public class TxLineOfSightVisualizer : MonoBehaviour
     [Header("Telemetry")]
     public WifiPoseLogger telemetryLogger;
     public bool autoAssignTelemetryAnchor = true;
+    public string roomAnchorObjectName = "RoomAnchor";
 
     [Header("Visual Mapping")]
     public Color antennaColor = new Color(1f, 0.1f, 0.85f, 1f);
@@ -43,6 +58,10 @@ public class TxLineOfSightVisualizer : MonoBehaviour
     public KeyCode placeKey = KeyCode.T;
     public KeyCode loadKey = KeyCode.L;
     public KeyCode eraseKey = KeyCode.Backspace;
+
+    [Header("Quest Controls")]
+    public OVRInput.Button placeButton = OVRInput.Button.One;
+    public OVRInput.Button loadButton = OVRInput.Button.Four;
 
     private GameObject currentMarker;
     private OVRSpatialAnchor currentAnchor;
@@ -62,20 +81,7 @@ public class TxLineOfSightVisualizer : MonoBehaviour
         savePath = Path.Combine(Application.persistentDataPath, saveFileName);
         Debug.Log("TxLineOfSightVisualizer save path: " + savePath);
 
-        if (placementSource == null)
-        {
-            Camera cam = Camera.main;
-
-            if (cam != null)
-            {
-                placementSource = cam.transform;
-                Debug.Log("TxLineOfSightVisualizer using Main Camera as placement source.");
-            }
-            else
-            {
-                Debug.LogWarning("No placementSource assigned and no Main Camera found.");
-            }
-        }
+        ResolvePlacementSource();
 
         if (telemetryLogger == null)
         {
@@ -90,8 +96,8 @@ public class TxLineOfSightVisualizer : MonoBehaviour
 
     void Update()
     {
-        bool questPlacePressed = OVRInput.GetDown(OVRInput.Button.One);
-        bool questLoadPressed = OVRInput.GetDown(OVRInput.Button.Two);
+        bool questPlacePressed = OVRInput.GetDown(placeButton);
+        bool questLoadPressed = OVRInput.GetDown(loadButton);
 
         if ((Input.GetKeyDown(placeKey) || questPlacePressed) && !isBusy)
         {
@@ -137,17 +143,18 @@ public class TxLineOfSightVisualizer : MonoBehaviour
     {
         isBusy = true;
 
-        if (placementSource == null)
+        if (!TryGetPlacementPose(out Pose placementPose))
         {
-            Debug.LogError("Cannot create Tx spatial anchor: placementSource is null.");
+            Debug.LogError("Cannot create Tx spatial anchor: no headset/controller placement pose is available.");
             isBusy = false;
             yield break;
         }
 
         ClearCurrentMarker();
 
-        Vector3 pos = placementSource.position + placementSource.forward * forwardOffsetMeters;
-        Quaternion rot = Quaternion.LookRotation(placementSource.forward, Vector3.up);
+        Vector3 forward = placementPose.rotation * Vector3.forward;
+        Vector3 pos = placementPose.position + forward * forwardOffsetMeters;
+        Quaternion rot = Quaternion.LookRotation(forward, Vector3.up);
 
         currentMarker = CreateMarkerObject(pos, rot);
         currentAnchor = EnsureSpatialAnchor(currentMarker);
@@ -191,6 +198,114 @@ public class TxLineOfSightVisualizer : MonoBehaviour
         Debug.Log("Saved Tx spatial anchor at: " + currentMarker.transform.position);
 
         isBusy = false;
+    }
+
+    private bool TryGetPlacementPose(out Pose pose)
+    {
+        if (useOVRControllerPose && TryGetOVRControllerPose(out pose))
+        {
+            return true;
+        }
+
+        ResolvePlacementSource();
+
+        if (placementSource != null)
+        {
+            pose = new Pose(placementSource.position, placementSource.rotation);
+            return true;
+        }
+
+        pose = default;
+        return false;
+    }
+
+    private bool TryGetOVRControllerPose(out Pose pose)
+    {
+        Transform trackingRoot = ResolveTrackingSpace();
+
+        if (trackingRoot == null)
+        {
+            pose = default;
+            return false;
+        }
+
+        Vector3 localPosition = OVRInput.GetLocalControllerPosition(placementController);
+        Quaternion localRotation = OVRInput.GetLocalControllerRotation(placementController);
+
+        if (localPosition == Vector3.zero && localRotation == Quaternion.identity)
+        {
+            pose = default;
+            return false;
+        }
+
+        pose = new Pose(
+            trackingRoot.TransformPoint(localPosition),
+            trackingRoot.rotation * localRotation
+        );
+
+        return true;
+    }
+
+    private Transform ResolveTrackingSpace()
+    {
+        if (trackingSpace != null)
+        {
+            return trackingSpace;
+        }
+
+        OVRCameraRig cameraRig = FindFirstObjectByType<OVRCameraRig>();
+
+        if (cameraRig != null && cameraRig.trackingSpace != null)
+        {
+            trackingSpace = cameraRig.trackingSpace;
+        }
+
+        return trackingSpace;
+    }
+
+    private void ResolvePlacementSource()
+    {
+        Camera cam = Camera.main;
+        bool placementSourceIsCamera = cam != null && placementSource == cam.transform;
+
+        if (placementSourceIsCamera && !allowHeadsetPlacementFallback)
+        {
+            placementSource = null;
+        }
+
+        if (autoUseControllerPlacementSource)
+        {
+            for (int i = 0; i < controllerPlacementSourceNames.Length; i++)
+            {
+                GameObject sourceObject = GameObject.Find(controllerPlacementSourceNames[i]);
+
+                if (sourceObject != null)
+                {
+                    if (placementSource == null || placementSourceIsCamera)
+                    {
+                        placementSource = sourceObject.transform;
+                        Debug.Log("TxLineOfSightVisualizer using controller placement source: " + sourceObject.name);
+                    }
+
+                    return;
+                }
+            }
+        }
+
+        if (placementSource != null)
+        {
+            return;
+        }
+
+        if (allowHeadsetPlacementFallback && cam != null)
+        {
+            placementSource = cam.transform;
+            Debug.LogWarning("TxLineOfSightVisualizer using Main Camera as fallback placement source.");
+        }
+        else
+        {
+            Debug.LogWarning("No placementSource assigned and no controller anchor found. Headset fallback is disabled.");
+        }
     }
 
     private IEnumerator LoadSavedTxAnchorRoutine()
@@ -324,7 +439,7 @@ public class TxLineOfSightVisualizer : MonoBehaviour
 
         if (autoAssignTelemetryAnchor && telemetryLogger != null)
         {
-            telemetryLogger.anchorTransform = null;
+            telemetryLogger.UseRoomAnchor();
         }
 
         isBusy = false;
@@ -435,9 +550,21 @@ public class TxLineOfSightVisualizer : MonoBehaviour
 
     private void AssignTelemetryAnchor()
     {
-        if (autoAssignTelemetryAnchor && telemetryLogger != null && currentMarker != null)
+        if (!autoAssignTelemetryAnchor || telemetryLogger == null)
         {
-            telemetryLogger.anchorTransform = currentMarker.transform;
+            return;
+        }
+
+        GameObject roomAnchor = GameObject.Find(roomAnchorObjectName);
+
+        if (roomAnchor != null)
+        {
+            telemetryLogger.anchorTransform = roomAnchor.transform;
+            Debug.Log("TxLineOfSightVisualizer assigned WifiPoseLogger anchorTransform to RoomAnchor.");
+        }
+        else
+        {
+            telemetryLogger.UseRoomAnchor();
         }
     }
 

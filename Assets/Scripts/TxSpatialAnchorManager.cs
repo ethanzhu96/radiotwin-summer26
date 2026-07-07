@@ -34,6 +34,15 @@ public class TxSpatialAnchorManager : MonoBehaviour
 
     void Start()
     {
+        TxLineOfSightVisualizer lineOfSightVisualizer = GetComponent<TxLineOfSightVisualizer>();
+
+        if (lineOfSightVisualizer != null && lineOfSightVisualizer.enabled)
+        {
+            Debug.LogWarning("TxSpatialAnchorManager disabled because TxLineOfSightVisualizer is handling Tx anchor placement.");
+            enabled = false;
+            return;
+        }
+
         savePath = Path.Combine(Application.persistentDataPath, saveFileName);
 
         Debug.Log("Tx spatial anchor save path: " + savePath);

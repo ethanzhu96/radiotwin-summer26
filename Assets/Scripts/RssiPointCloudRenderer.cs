@@ -108,22 +108,22 @@ public class RssiPointCloudRenderer : MonoBehaviour
 
         string[] headers = lines[0].Split(',');
 
-        int ix = Array.IndexOf(headers, "pos_x");
-        int iy = Array.IndexOf(headers, "pos_y");
-        int iz = Array.IndexOf(headers, "pos_z");
+        int ix = FindColumn(headers, "anchor_local_x", "local_pos_x", "pos_x", "world_pos_x");
+        int iy = FindColumn(headers, "anchor_local_y", "local_pos_y", "pos_y", "world_pos_y");
+        int iz = FindColumn(headers, "anchor_local_z", "local_pos_z", "pos_z", "world_pos_z");
         int irssi = Array.IndexOf(headers, "rssi_dbm");
-
-        // Fallback for older CSV format
-        if (ix < 0) ix = Array.IndexOf(headers, "world_pos_x");
-        if (iy < 0) iy = Array.IndexOf(headers, "world_pos_y");
-        if (iz < 0) iz = Array.IndexOf(headers, "world_pos_z");
 
         if (ix < 0 || iy < 0 || iz < 0 || irssi < 0)
         {
-            Debug.LogError("CSV missing required columns. Need pos_x,pos_y,pos_z,rssi_dbm or world_pos_x/world_pos_y/world_pos_z/rssi_dbm.");
+            Debug.LogError("CSV missing required columns. Need anchor_local_x/anchor_local_y/anchor_local_z, pos_x/pos_y/pos_z, or world_pos_x/world_pos_y/world_pos_z and rssi_dbm.");
             Debug.LogError("Headers found: " + string.Join(" | ", headers));
             return;
         }
+
+        bool positionsAreWorld =
+            CleanHeader(headers[ix]) == "world_pos_x" &&
+            CleanHeader(headers[iy]) == "world_pos_y" &&
+            CleanHeader(headers[iz]) == "world_pos_z";
 
         for (int row = 1; row < lines.Length; row++)
         {
@@ -145,7 +145,8 @@ public class RssiPointCloudRenderer : MonoBehaviour
             float z = ParseFloat(cols[iz]);
             float rssi = ParseFloat(cols[irssi]);
 
-            Vector3 pos = new Vector3(x, y, z);
+            Vector3 localPos = new Vector3(x, y, z);
+            Vector3 pos = positionsAreWorld ? localPos : transform.TransformPoint(localPos);
 
             Debug.Log($"Point loaded at {pos} with RSSI {rssi}");
 
@@ -194,6 +195,29 @@ public class RssiPointCloudRenderer : MonoBehaviour
 
         Debug.LogWarning("Failed to parse float from: " + s);
         return 0f;
+    }
+
+    int FindColumn(string[] headers, params string[] possibleNames)
+    {
+        for (int i = 0; i < headers.Length; i++)
+        {
+            string cleanedHeader = CleanHeader(headers[i]);
+
+            foreach (string possibleName in possibleNames)
+            {
+                if (cleanedHeader == CleanHeader(possibleName))
+                {
+                    return i;
+                }
+            }
+        }
+
+        return -1;
+    }
+
+    string CleanHeader(string s)
+    {
+        return s.Trim().Replace("\"", "").ToLowerInvariant();
     }
 
     Vector4 RssiToColor(float rssi)

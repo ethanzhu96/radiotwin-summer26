@@ -8,9 +8,11 @@ public class M4VoxelCloudVisualizer : MonoBehaviour
     [Header("CSV")]
     public string fileName = "rf_trajectory_log.csv";
 
+    [Header("Coordinate Frame")]
+    public Transform coordinateFrameRoot;
+
     [Header("Voxel Grid")]
     public float voxelSize = 0.5f;
-    public float visualScale = 1f;
     public float verticalMinY = 0f;
     public float verticalMaxY = 2f;
     public int maxVoxels = 5000;
@@ -36,6 +38,7 @@ public class M4VoxelCloudVisualizer : MonoBehaviour
     public void GenerateVoxelCloud()
     {
         ClearChildren();
+        ResolveCoordinateFrameRoot();
 
         string path = Path.Combine(Application.persistentDataPath, fileName);
 
@@ -72,14 +75,14 @@ public class M4VoxelCloudVisualizer : MonoBehaviour
 
         string[] headers = SplitCsvLine(lines[0]);
 
-        int xIndex = FindColumn(headers, "world_pos_x", "pos_x");
-        int yIndex = FindColumn(headers, "world_pos_y", "pos_y");
-        int zIndex = FindColumn(headers, "world_pos_z", "pos_z");
+        int xIndex = FindColumn(headers, "anchor_local_x", "local_pos_x", "pos_x", "world_pos_x");
+        int yIndex = FindColumn(headers, "anchor_local_y", "local_pos_y", "pos_y", "world_pos_y");
+        int zIndex = FindColumn(headers, "anchor_local_z", "local_pos_z", "pos_z", "world_pos_z");
         int rssiIndex = FindColumn(headers, "rssi_dbm", "rssi", "rssiDbm");
 
         if (xIndex < 0 || yIndex < 0 || zIndex < 0 || rssiIndex < 0)
         {
-            Debug.LogError("M4VoxelCloudVisualizer: CSV missing required columns. Need world_pos_x/world_pos_y/world_pos_z or pos_x/pos_y/pos_z and rssi_dbm.");
+            Debug.LogError("M4VoxelCloudVisualizer: CSV missing required columns. Need anchor_local_x/anchor_local_y/anchor_local_z, pos_x/pos_y/pos_z, or world_pos_x/world_pos_y/world_pos_z and rssi_dbm.");
             Debug.LogError("M4VoxelCloudVisualizer headers found: " + string.Join(" | ", headers));
             return samples;
         }
@@ -217,8 +220,9 @@ public class M4VoxelCloudVisualizer : MonoBehaviour
         voxel.name = "M4_VOXEL_RSSI_" + rssi.ToString("F1", CultureInfo.InvariantCulture);
 
         voxel.transform.SetParent(transform, false);
-        voxel.transform.position = center * visualScale;
-        voxel.transform.localScale = Vector3.one * voxelSize * visualScale;
+        voxel.transform.localPosition = ToModeLocalPosition(center);
+        voxel.transform.localRotation = ToModeLocalRotation(Quaternion.identity);
+        voxel.transform.localScale = Vector3.one * voxelSize;
 
         Collider collider = voxel.GetComponent<Collider>();
         if (collider != null)
@@ -300,6 +304,44 @@ public class M4VoxelCloudVisualizer : MonoBehaviour
                 DestroyImmediate(child);
             }
         }
+    }
+
+    private Vector3 ToModeLocalPosition(Vector3 coordinateFrameLocalPosition)
+    {
+        if (coordinateFrameRoot == null)
+        {
+            return coordinateFrameLocalPosition;
+        }
+
+        Vector3 worldPosition = coordinateFrameRoot.TransformPoint(coordinateFrameLocalPosition);
+        return transform.InverseTransformPoint(worldPosition);
+    }
+
+    private void ResolveCoordinateFrameRoot()
+    {
+        if (coordinateFrameRoot != null)
+        {
+            return;
+        }
+
+        GameObject roomAnchor = GameObject.Find("RoomAnchor");
+
+        if (roomAnchor != null)
+        {
+            coordinateFrameRoot = roomAnchor.transform;
+            Debug.Log("M4VoxelCloudVisualizer: Auto-assigned coordinateFrameRoot to RoomAnchor.");
+        }
+    }
+
+    private Quaternion ToModeLocalRotation(Quaternion coordinateFrameLocalRotation)
+    {
+        if (coordinateFrameRoot == null)
+        {
+            return coordinateFrameLocalRotation;
+        }
+
+        Quaternion worldRotation = coordinateFrameRoot.rotation * coordinateFrameLocalRotation;
+        return Quaternion.Inverse(transform.rotation) * worldRotation;
     }
 
     private int FindColumn(string[] headers, params string[] possibleNames)

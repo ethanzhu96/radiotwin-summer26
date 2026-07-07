@@ -14,6 +14,9 @@ public class M3Collapsed2DVisualizer : MonoBehaviour
     [Header("CSV")]
     public string fileName = "rf_trajectory_log.csv";
 
+    [Header("Coordinate Frame")]
+    public Transform coordinateFrameRoot;
+
     [Header("Voxel Field")]
     public float voxelSize = 0.5f;
     public float verticalMinY = 0f;
@@ -26,7 +29,6 @@ public class M3Collapsed2DVisualizer : MonoBehaviour
     public float semanticHeightCenter = 1.1f;
     public float semanticHeightSigma = 0.45f;
     public float floorY = 0.01f;
-    public float visualScale = 1f;
 
     [Header("RSSI")]
     public float minRssi = -70f;
@@ -82,6 +84,8 @@ public class M3Collapsed2DVisualizer : MonoBehaviour
     [ContextMenu("Regenerate Collapsed 2D")]
     public void GenerateCollapsed2D()
     {
+        ResolveCoordinateFrameRoot();
+
         if (clearOldTilesOnStart)
         {
             ClearChildren();
@@ -137,14 +141,14 @@ public class M3Collapsed2DVisualizer : MonoBehaviour
 
         string[] headers = SplitCsvLine(lines[0]);
 
-        int xIndex = FindColumn(headers, "world_pos_x", "pos_x");
-        int yIndex = FindColumn(headers, "world_pos_y", "pos_y");
-        int zIndex = FindColumn(headers, "world_pos_z", "pos_z");
+        int xIndex = FindColumn(headers, "anchor_local_x", "local_pos_x", "pos_x", "world_pos_x");
+        int yIndex = FindColumn(headers, "anchor_local_y", "local_pos_y", "pos_y", "world_pos_y");
+        int zIndex = FindColumn(headers, "anchor_local_z", "local_pos_z", "pos_z", "world_pos_z");
         int rssiIndex = FindColumn(headers, "rssi_dbm", "rssi", "rssiDbm");
 
         if (xIndex < 0 || yIndex < 0 || zIndex < 0 || rssiIndex < 0)
         {
-            Debug.LogError("M3Collapsed2DVisualizer: CSV missing required columns. Need world_pos_x/world_pos_y/world_pos_z or pos_x/pos_y/pos_z and rssi_dbm.");
+            Debug.LogError("M3Collapsed2DVisualizer: CSV missing required columns. Need anchor_local_x/anchor_local_y/anchor_local_z, pos_x/pos_y/pos_z, or world_pos_x/world_pos_y/world_pos_z and rssi_dbm.");
             Debug.LogError("M3Collapsed2DVisualizer headers found: " + string.Join(" | ", headers));
             return samples;
         }
@@ -319,17 +323,16 @@ public class M3Collapsed2DVisualizer : MonoBehaviour
             Vector2Int cell = kvp.Key;
             float collapsedRssi = kvp.Value.Average();
 
-            float scaledVoxelSize = voxelSize * visualScale;
-            float x = (cell.x + 0.5f) * scaledVoxelSize;
-            float z = (cell.y + 0.5f) * scaledVoxelSize;
+            float x = (cell.x + 0.5f) * voxelSize;
+            float z = (cell.y + 0.5f) * voxelSize;
 
             GameObject tile = GameObject.CreatePrimitive(PrimitiveType.Quad);
             tile.name = "M3_COLLAPSED_TILE_" + cell.x + "_" + cell.y + "_avg_" + collapsedRssi.ToString("F1", CultureInfo.InvariantCulture);
 
             tile.transform.SetParent(transform, false);
-            tile.transform.position = new Vector3(x, floorY, z);
-            tile.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
-            tile.transform.localScale = new Vector3(scaledVoxelSize, scaledVoxelSize, 1f);
+            tile.transform.localPosition = ToModeLocalPosition(new Vector3(x, floorY, z));
+            tile.transform.localRotation = ToModeLocalRotation(Quaternion.Euler(90f, 0f, 0f));
+            tile.transform.localScale = new Vector3(voxelSize, voxelSize, 1f);
 
             Collider collider = tile.GetComponent<Collider>();
             if (collider != null)
@@ -417,6 +420,44 @@ public class M3Collapsed2DVisualizer : MonoBehaviour
                 DestroyImmediate(child);
             }
         }
+    }
+
+    private Vector3 ToModeLocalPosition(Vector3 coordinateFrameLocalPosition)
+    {
+        if (coordinateFrameRoot == null)
+        {
+            return coordinateFrameLocalPosition;
+        }
+
+        Vector3 worldPosition = coordinateFrameRoot.TransformPoint(coordinateFrameLocalPosition);
+        return transform.InverseTransformPoint(worldPosition);
+    }
+
+    private void ResolveCoordinateFrameRoot()
+    {
+        if (coordinateFrameRoot != null)
+        {
+            return;
+        }
+
+        GameObject roomAnchor = GameObject.Find("RoomAnchor");
+
+        if (roomAnchor != null)
+        {
+            coordinateFrameRoot = roomAnchor.transform;
+            Debug.Log("M3Collapsed2DVisualizer: Auto-assigned coordinateFrameRoot to RoomAnchor.");
+        }
+    }
+
+    private Quaternion ToModeLocalRotation(Quaternion coordinateFrameLocalRotation)
+    {
+        if (coordinateFrameRoot == null)
+        {
+            return coordinateFrameLocalRotation;
+        }
+
+        Quaternion worldRotation = coordinateFrameRoot.rotation * coordinateFrameLocalRotation;
+        return Quaternion.Inverse(transform.rotation) * worldRotation;
     }
 
     private int FindColumn(string[] headers, params string[] possibleNames)
