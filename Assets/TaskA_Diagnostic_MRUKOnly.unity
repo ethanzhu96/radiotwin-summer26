@@ -5107,7 +5107,7 @@ MonoBehaviour:
   renderFrameMode: 1
   coordinateFrameRoot: {fileID: 1995644374}
   inputPositionsAreMeshLocal: 1
-  parentToMRUKRoomAtRuntime: 1
+  parentToMRUKRoomAtRuntime: 0
   positionOffset: {x: 0, y: 0, z: 0}
   yawOffsetDegrees: 0
   drawSamplePoints: 1

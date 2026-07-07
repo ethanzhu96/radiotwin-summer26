@@ -19,7 +19,7 @@ public class M0_RawTrajectory : MonoBehaviour
     public RenderFrameMode renderFrameMode = RenderFrameMode.LiveMRUKRoom;
     public Transform coordinateFrameRoot;
     public bool inputPositionsAreMeshLocal = true;
-    public bool parentToMRUKRoomAtRuntime = true;
+    public bool parentToMRUKRoomAtRuntime = false;
 
     [Header("Alignment Nudge")]
     public Vector3 positionOffset = Vector3.zero;
@@ -299,23 +299,27 @@ public class M0_RawTrajectory : MonoBehaviour
 
     private Vector3 ToModeLocalPosition(Vector3 coordinateFrameLocalPosition)
     {
-        Vector3 modeLocalPosition;
+        Vector3 nudgedFramePosition =
+            Quaternion.Euler(0f, yawOffsetDegrees, 0f) * coordinateFrameLocalPosition + positionOffset;
 
         if (inputPositionsAreMeshLocal || csvPositionsAreMeshLocal)
         {
-            modeLocalPosition = coordinateFrameLocalPosition;
-        }
-        else if (coordinateFrameRoot == null)
-        {
-            modeLocalPosition = coordinateFrameLocalPosition;
-        }
-        else
-        {
-            Vector3 worldPosition = coordinateFrameRoot.TransformPoint(coordinateFrameLocalPosition);
-            modeLocalPosition = transform.InverseTransformPoint(worldPosition);
+            if (renderFrameMode == RenderFrameMode.LiveMRUKRoom && coordinateFrameRoot != null)
+            {
+                Vector3 worldPosition = coordinateFrameRoot.TransformPoint(nudgedFramePosition);
+                return transform.InverseTransformPoint(worldPosition);
+            }
+
+            return nudgedFramePosition;
         }
 
-        return Quaternion.Euler(0f, yawOffsetDegrees, 0f) * modeLocalPosition + positionOffset;
+        if (coordinateFrameRoot == null)
+        {
+            return nudgedFramePosition;
+        }
+
+        Vector3 legacyWorldPosition = coordinateFrameRoot.TransformPoint(nudgedFramePosition);
+        return transform.InverseTransformPoint(legacyWorldPosition);
     }
 
     private bool ResolveCoordinateFrameRoot()
@@ -330,11 +334,10 @@ public class M0_RawTrajectory : MonoBehaviour
 
             if (parentToMRUKRoomAtRuntime && Application.isPlaying && transform.parent != coordinateFrameRoot)
             {
-                transform.SetParent(coordinateFrameRoot, false);
-                transform.localPosition = Vector3.zero;
-                transform.localRotation = Quaternion.identity;
-                transform.localScale = Vector3.one;
-                Debug.Log("M0_RawTrajectory: Parent set to MRUK room frame: " + coordinateFrameRoot.name);
+                Debug.LogWarning(
+                    "M0_RawTrajectory: parentToMRUKRoomAtRuntime is deprecated for stable placement. " +
+                    "Leave it disabled; M0 now converts room-local CSV points through coordinateFrameRoot without reparenting."
+                );
             }
 
             bool changedToMRUK = previousRoot != coordinateFrameRoot || lastResolvedCoordinateFrameRoot != coordinateFrameRoot;

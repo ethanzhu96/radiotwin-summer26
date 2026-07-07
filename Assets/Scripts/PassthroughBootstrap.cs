@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Reflection;
 using UnityEngine;
 
@@ -7,12 +8,20 @@ public class PassthroughBootstrap : MonoBehaviour
     public bool enableOnStart = true;
     public bool forceTransparentCameraBackground = true;
     public bool addPassthroughLayerIfMissing = true;
+    public bool useOpaqueFallbackIfPassthroughFails = true;
+    public float fallbackCheckDelaySeconds = 2.5f;
+    public Color fallbackBackgroundColor = new Color(0.04f, 0.06f, 0.09f, 1f);
 
     void Start()
     {
         if (enableOnStart)
         {
             EnablePassthrough();
+        }
+
+        if (useOpaqueFallbackIfPassthroughFails)
+        {
+            StartCoroutine(FallbackIfPassthroughDoesNotInitialize());
         }
     }
 
@@ -92,6 +101,51 @@ public class PassthroughBootstrap : MonoBehaviour
         }
 
         Debug.Log("PassthroughBootstrap: Set " + cameras.Length + " camera backgrounds transparent.");
+    }
+
+    private IEnumerator FallbackIfPassthroughDoesNotInitialize()
+    {
+        yield return new WaitForSeconds(fallbackCheckDelaySeconds);
+
+        if (IsInsightPassthroughInitialized())
+        {
+            Debug.Log("PassthroughBootstrap: Passthrough initialized.");
+            yield break;
+        }
+
+        Camera[] cameras = FindObjectsByType<Camera>(FindObjectsSortMode.None);
+
+        foreach (Camera camera in cameras)
+        {
+            camera.clearFlags = CameraClearFlags.SolidColor;
+            camera.backgroundColor = fallbackBackgroundColor;
+        }
+
+        Debug.LogWarning(
+            "PassthroughBootstrap: Passthrough did not initialize after " +
+            fallbackCheckDelaySeconds.ToString("F1") +
+            " seconds. Restored opaque camera background so the app does not appear black.");
+    }
+
+    private static bool IsInsightPassthroughInitialized()
+    {
+        Type managerType = FindType("OVRManager");
+
+        if (managerType == null)
+        {
+            return false;
+        }
+
+        MethodInfo method = managerType.GetMethod(
+            "IsInsightPassthroughInitialized",
+            BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+
+        if (method == null || method.ReturnType != typeof(bool))
+        {
+            return false;
+        }
+
+        return (bool)method.Invoke(null, null);
     }
 
     private static Type FindType(string typeName)
