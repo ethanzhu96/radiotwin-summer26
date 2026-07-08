@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -60,9 +61,17 @@ public class M0_RawTrajectory : MonoBehaviour
     private Vector3 lastCoordinateFramePosition;
     private Quaternion lastCoordinateFrameRotation;
     private Vector3 lastCoordinateFrameScale;
+    private Coroutine waitForLiveMRUKRoomCoroutine;
 
     void Start()
     {
+        if (ShouldWaitForLiveMRUKRoom())
+        {
+            ClearGeneratedTrajectory();
+            RequestGenerateWhenLiveMRUKRoomReady();
+            return;
+        }
+
         GenerateRawTrajectory();
         RememberAppliedAlignment();
     }
@@ -89,7 +98,15 @@ public class M0_RawTrajectory : MonoBehaviour
     [ContextMenu("Regenerate Raw Trajectory")]
     public void GenerateRawTrajectory()
     {
-        ClearChildren();
+        if (ShouldWaitForLiveMRUKRoom())
+        {
+            ClearGeneratedTrajectory();
+            RequestGenerateWhenLiveMRUKRoomReady();
+            Debug.LogWarning("M0_RawTrajectory: waiting for live MRUK room before generating.");
+            return;
+        }
+
+        ClearGeneratedTrajectory();
         ResolveCoordinateFrameRoot();
 
         string path = Path.Combine(Application.persistentDataPath, fileName);
@@ -110,6 +127,17 @@ public class M0_RawTrajectory : MonoBehaviour
         {
             Debug.LogWarning("M0_RawTrajectory: No samples loaded.");
             DisablePathLine();
+            return;
+        }
+
+        if (IsStaleSerializedRoomAnchorFrame())
+        {
+            Debug.LogError(
+                "M0_RawTrajectory: refusing to render MRUK-local CSV under serialized RoomAnchor. " +
+                "Waiting for live MRUK room frame instead."
+            );
+            ClearGeneratedTrajectory();
+            RequestGenerateWhenLiveMRUKRoomReady();
             return;
         }
 
@@ -413,6 +441,11 @@ public class M0_RawTrajectory : MonoBehaviour
 
         if (renderFrameMode == RenderFrameMode.LiveMRUKRoom)
         {
+            if (Application.isPlaying)
+            {
+                coordinateFrameRoot = null;
+            }
+
             lastResolvedCoordinateFrameRoot = coordinateFrameRoot;
             return previousRoot != coordinateFrameRoot;
         }
@@ -443,6 +476,44 @@ public class M0_RawTrajectory : MonoBehaviour
             renderFrameMode == RenderFrameMode.LiveMRUKRoom &&
             coordinateFrameRoot != null &&
             transform.parent == coordinateFrameRoot;
+    }
+
+    private bool IsStaleSerializedRoomAnchorFrame()
+    {
+        return renderFrameMode == RenderFrameMode.LiveMRUKRoom &&
+            csvPositionsAreMeshLocal &&
+            coordinateFrameRoot != null &&
+            coordinateFrameRoot.name == "RoomAnchor";
+    }
+
+    private bool ShouldWaitForLiveMRUKRoom()
+    {
+        return Application.isPlaying &&
+            renderFrameMode == RenderFrameMode.LiveMRUKRoom &&
+            (MRUK.Instance == null || MRUK.Instance.GetCurrentRoom() == null);
+    }
+
+    private void RequestGenerateWhenLiveMRUKRoomReady()
+    {
+        if (!Application.isPlaying || waitForLiveMRUKRoomCoroutine != null)
+        {
+            return;
+        }
+
+        waitForLiveMRUKRoomCoroutine = StartCoroutine(GenerateWhenLiveMRUKRoomReady());
+    }
+
+    private IEnumerator GenerateWhenLiveMRUKRoomReady()
+    {
+        while (MRUK.Instance == null || MRUK.Instance.GetCurrentRoom() == null)
+        {
+            yield return null;
+        }
+
+        yield return null;
+
+        waitForLiveMRUKRoomCoroutine = null;
+        GenerateRawTrajectory();
     }
 
     private void FollowCoordinateFrameRoot()
@@ -552,6 +623,12 @@ public class M0_RawTrajectory : MonoBehaviour
 
         c.a = alpha;
         return c;
+    }
+
+    private void ClearGeneratedTrajectory()
+    {
+        ClearChildren();
+        DisablePathLine();
     }
 
     private void ClearChildren()
