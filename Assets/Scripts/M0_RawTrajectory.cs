@@ -21,6 +21,12 @@ public class M0_RawTrajectory : MonoBehaviour
     public bool inputPositionsAreMeshLocal = true;
     public bool parentToMRUKRoomAtRuntime = false;
 
+    [Header("Live Room Tracking")]
+    public bool followLiveMRUKRoomTransform = true;
+    public bool regenerateWhenCoordinateFrameMoves = true;
+    public float coordinateFrameMoveThresholdMeters = 0.005f;
+    public float coordinateFrameRotateThresholdDegrees = 0.25f;
+
     [Header("Alignment Nudge")]
     public Vector3 positionOffset = Vector3.zero;
     public float yawOffsetDegrees = 0f;
@@ -50,6 +56,10 @@ public class M0_RawTrajectory : MonoBehaviour
     private float lastAppliedYawOffsetDegrees;
     private Vector3 lastAppliedPositionOffset;
     private Transform lastResolvedCoordinateFrameRoot;
+    private bool hasRememberedCoordinateFramePose;
+    private Vector3 lastCoordinateFramePosition;
+    private Quaternion lastCoordinateFrameRotation;
+    private Vector3 lastCoordinateFrameScale;
 
     void Start()
     {
@@ -64,9 +74,12 @@ public class M0_RawTrajectory : MonoBehaviour
             return;
         }
 
+        bool coordinateFrameRootChanged = ResolveCoordinateFrameRoot();
+
         if (!Mathf.Approximately(yawOffsetDegrees, lastAppliedYawOffsetDegrees) ||
             positionOffset != lastAppliedPositionOffset ||
-            ResolveCoordinateFrameRoot())
+            coordinateFrameRootChanged ||
+            HasCoordinateFramePoseChanged())
         {
             GenerateRawTrajectory();
             RememberAppliedAlignment();
@@ -133,6 +146,50 @@ public class M0_RawTrajectory : MonoBehaviour
     {
         lastAppliedYawOffsetDegrees = yawOffsetDegrees;
         lastAppliedPositionOffset = positionOffset;
+        RememberCoordinateFramePose();
+    }
+
+    private void RememberCoordinateFramePose()
+    {
+        if (coordinateFrameRoot == null)
+        {
+            hasRememberedCoordinateFramePose = false;
+            return;
+        }
+
+        hasRememberedCoordinateFramePose = true;
+        lastCoordinateFramePosition = coordinateFrameRoot.position;
+        lastCoordinateFrameRotation = coordinateFrameRoot.rotation;
+        lastCoordinateFrameScale = coordinateFrameRoot.lossyScale;
+    }
+
+    private bool HasCoordinateFramePoseChanged()
+    {
+        if (!regenerateWhenCoordinateFrameMoves || coordinateFrameRoot == null)
+        {
+            return false;
+        }
+
+        if (IsFollowingCoordinateFrame())
+        {
+            return false;
+        }
+
+        if (!hasRememberedCoordinateFramePose)
+        {
+            return true;
+        }
+
+        float moveThreshold = Mathf.Max(0f, coordinateFrameMoveThresholdMeters);
+        float rotateThreshold = Mathf.Max(0f, coordinateFrameRotateThresholdDegrees);
+
+        bool moved = (coordinateFrameRoot.position - lastCoordinateFramePosition).sqrMagnitude >
+            moveThreshold * moveThreshold;
+        bool rotated = Quaternion.Angle(coordinateFrameRoot.rotation, lastCoordinateFrameRotation) >
+            rotateThreshold;
+        bool scaled = (coordinateFrameRoot.lossyScale - lastCoordinateFrameScale).sqrMagnitude > 0.000001f;
+
+        return moved || rotated || scaled;
     }
 
     private List<SignalSample> LoadSamples(string path)
@@ -304,6 +361,11 @@ public class M0_RawTrajectory : MonoBehaviour
 
         if (inputPositionsAreMeshLocal || csvPositionsAreMeshLocal)
         {
+            if (IsFollowingCoordinateFrame())
+            {
+                return nudgedFramePosition;
+            }
+
             if (renderFrameMode == RenderFrameMode.LiveMRUKRoom && coordinateFrameRoot != null)
             {
                 Vector3 worldPosition = coordinateFrameRoot.TransformPoint(nudgedFramePosition);
@@ -332,11 +394,15 @@ public class M0_RawTrajectory : MonoBehaviour
         {
             coordinateFrameRoot = MRUK.Instance.GetCurrentRoom().transform;
 
-            if (parentToMRUKRoomAtRuntime && Application.isPlaying && transform.parent != coordinateFrameRoot)
+            if (Application.isPlaying && followLiveMRUKRoomTransform)
+            {
+                FollowCoordinateFrameRoot();
+            }
+            else if (parentToMRUKRoomAtRuntime && Application.isPlaying && transform.parent != coordinateFrameRoot)
             {
                 Debug.LogWarning(
                     "M0_RawTrajectory: parentToMRUKRoomAtRuntime is deprecated for stable placement. " +
-                    "Leave it disabled; M0 now converts room-local CSV points through coordinateFrameRoot without reparenting."
+                    "Use followLiveMRUKRoomTransform instead so M0 follows the live MRUK room frame."
                 );
             }
 
@@ -368,6 +434,29 @@ public class M0_RawTrajectory : MonoBehaviour
         bool changed = previousRoot != coordinateFrameRoot || lastResolvedCoordinateFrameRoot != coordinateFrameRoot;
         lastResolvedCoordinateFrameRoot = coordinateFrameRoot;
         return changed;
+    }
+
+    private bool IsFollowingCoordinateFrame()
+    {
+        return Application.isPlaying &&
+            followLiveMRUKRoomTransform &&
+            renderFrameMode == RenderFrameMode.LiveMRUKRoom &&
+            coordinateFrameRoot != null &&
+            transform.parent == coordinateFrameRoot;
+    }
+
+    private void FollowCoordinateFrameRoot()
+    {
+        if (coordinateFrameRoot == null || transform.parent == coordinateFrameRoot)
+        {
+            return;
+        }
+
+        transform.SetParent(coordinateFrameRoot, false);
+        transform.localPosition = Vector3.zero;
+        transform.localRotation = Quaternion.identity;
+        transform.localScale = Vector3.one;
+        Debug.Log("M0_RawTrajectory: Following live MRUK room frame: " + coordinateFrameRoot.name);
     }
 
     private GradientColorKey[] BuildLineColorKeys(List<SignalSample> samples)
