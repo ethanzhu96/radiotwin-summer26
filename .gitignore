@@ -3,6 +3,9 @@ data/
 outputs/
 *.csv
 
+# Personal project notes / interview prep
+radiotwin_docs/
+
 # Python local files
 __pycache__/
 *.py[cod]
