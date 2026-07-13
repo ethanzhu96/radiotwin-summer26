@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -42,14 +43,25 @@ public class RssiFloorHeatmap : MonoBehaviour
         }
     }
 
-    void Start()
+    IEnumerator Start()
     {
+        yield return RoomAlignmentManager.WaitForPlaybackDecision();
+        if (RoomAlignmentManager.Instance == null || !RoomAlignmentManager.Instance.AttachVisualization(transform, "M1"))
+        {
+            yield break;
+        }
+        coordinateFrameRoot = null;
         GenerateFloorHeatmap();
     }
 
     [ContextMenu("Regenerate Floor Heatmap")]
     public void GenerateFloorHeatmap()
     {
+        if (Application.isPlaying && (RoomAlignmentManager.Instance == null ||
+            RoomAlignmentManager.Instance.State != RoomAlignmentManager.PlaybackState.Ready))
+        {
+            return;
+        }
         ResolveCoordinateFrameRoot();
 
         if (clearOldTilesOnStart)
@@ -89,13 +101,13 @@ public class RssiFloorHeatmap : MonoBehaviour
 
         string[] headers = lines[0].Split(',');
 
-        int ix = FindColumn(headers, "anchor_local_x", "local_pos_x", "pos_x", "world_pos_x");
-        int iz = FindColumn(headers, "anchor_local_z", "local_pos_z", "pos_z", "world_pos_z");
+        int ix = FindColumn(headers, "reference_local_pos_x");
+        int iz = FindColumn(headers, "reference_local_pos_z");
         int irssi = Array.IndexOf(headers, "rssi_dbm");
 
         if (ix < 0 || iz < 0 || irssi < 0)
         {
-            Debug.LogError("CSV missing required columns. Need anchor_local_x/anchor_local_z/rssi_dbm, pos_x/pos_z/rssi_dbm, or world_pos_x/world_pos_z/rssi_dbm.");
+            Debug.LogError(RoomAlignmentManager.LogPrefix + " M1 rejected legacy CSV: authoritative reference_local_pos_* columns are required.");
             Debug.LogError("Headers found: " + string.Join(" | ", headers));
             return grid;
         }
@@ -234,6 +246,12 @@ public class RssiFloorHeatmap : MonoBehaviour
 
     void ResolveCoordinateFrameRoot()
     {
+        if (transform.parent != null && transform.parent.name == "DatasetRoot")
+        {
+            coordinateFrameRoot = null;
+            return;
+        }
+
         if (coordinateFrameRoot != null)
         {
             return;

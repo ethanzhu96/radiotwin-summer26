@@ -61,6 +61,7 @@ public class TxLineOfSightVisualizer : MonoBehaviour
 
     [Header("Quest Controls")]
     public OVRInput.Button placeButton = OVRInput.Button.One;
+    public bool placeButtonTogglesAnchor = true;
     public OVRInput.Button loadButton = OVRInput.Button.Four;
 
     private GameObject currentMarker;
@@ -101,7 +102,14 @@ public class TxLineOfSightVisualizer : MonoBehaviour
 
         if ((Input.GetKeyDown(placeKey) || questPlacePressed) && !isBusy)
         {
-            StartCoroutine(CreateAndSaveTxAnchorRoutine());
+            if (placeButtonTogglesAnchor && currentMarker != null)
+            {
+                StartCoroutine(EraseCurrentAnchorRoutine());
+            }
+            else
+            {
+                StartCoroutine(CreateAndSaveTxAnchorRoutine());
+            }
         }
 
         if ((Input.GetKeyDown(loadKey) || questLoadPressed) && !isBusy)
@@ -119,7 +127,14 @@ public class TxLineOfSightVisualizer : MonoBehaviour
     {
         if (!isBusy)
         {
-            StartCoroutine(CreateAndSaveTxAnchorRoutine());
+            if (placeButtonTogglesAnchor && currentMarker != null)
+            {
+                StartCoroutine(EraseCurrentAnchorRoutine());
+            }
+            else
+            {
+                StartCoroutine(CreateAndSaveTxAnchorRoutine());
+            }
         }
     }
 

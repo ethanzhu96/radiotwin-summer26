@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -51,14 +52,25 @@ public class M2HeightBarVisualizer : MonoBehaviour
         }
     }
 
-    void Start()
+    IEnumerator Start()
     {
+        yield return RoomAlignmentManager.WaitForPlaybackDecision();
+        if (RoomAlignmentManager.Instance == null || !RoomAlignmentManager.Instance.AttachVisualization(transform, "M2"))
+        {
+            yield break;
+        }
+        coordinateFrameRoot = null;
         GenerateHeightBars();
     }
 
     [ContextMenu("Regenerate Height Bars")]
     public void GenerateHeightBars()
     {
+        if (Application.isPlaying && (RoomAlignmentManager.Instance == null ||
+            RoomAlignmentManager.Instance.State != RoomAlignmentManager.PlaybackState.Ready))
+        {
+            return;
+        }
         ResolveCoordinateFrameRoot();
 
         if (clearOldBarsOnStart)
@@ -110,13 +122,13 @@ public class M2HeightBarVisualizer : MonoBehaviour
 
         string[] headers = SplitCsvLine(lines[0]);
 
-        int xIndex = FindColumn(headers, "anchor_local_x", "local_pos_x", "pos_x", "world_pos_x");
-        int zIndex = FindColumn(headers, "anchor_local_z", "local_pos_z", "pos_z", "world_pos_z");
+        int xIndex = FindColumn(headers, "reference_local_pos_x");
+        int zIndex = FindColumn(headers, "reference_local_pos_z");
         int rssiIndex = FindColumn(headers, "rssi_dbm", "rssi", "rssiDbm");
 
         if (xIndex < 0 || zIndex < 0 || rssiIndex < 0)
         {
-            Debug.LogError("M2HeightBarVisualizer: CSV missing required columns. Need anchor_local_x/anchor_local_z/rssi_dbm, pos_x/pos_z/rssi_dbm, or world_pos_x/world_pos_z/rssi_dbm.");
+            Debug.LogError(RoomAlignmentManager.LogPrefix + " M2 rejected legacy CSV: authoritative reference_local_pos_* columns are required.");
             Debug.LogError("M2HeightBarVisualizer headers found: " + string.Join(" | ", headers));
             return grid;
         }
@@ -320,6 +332,12 @@ public class M2HeightBarVisualizer : MonoBehaviour
 
     private void ResolveCoordinateFrameRoot()
     {
+        if (transform.parent != null && transform.parent.name == "DatasetRoot")
+        {
+            coordinateFrameRoot = null;
+            return;
+        }
+
         if (coordinateFrameRoot != null)
         {
             return;

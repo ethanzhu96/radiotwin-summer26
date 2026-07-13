@@ -62,16 +62,22 @@ public class M0_RawTrajectory : MonoBehaviour
     private Quaternion lastCoordinateFrameRotation;
     private Vector3 lastCoordinateFrameScale;
     private Coroutine waitForLiveMRUKRoomCoroutine;
+    private bool datasetManaged;
+    private bool playbackDecisionReceived;
 
-    void Start()
+    IEnumerator Start()
     {
-        if (ShouldWaitForLiveMRUKRoom())
+        yield return RoomAlignmentManager.WaitForPlaybackDecision();
+        playbackDecisionReceived = true;
+        RoomAlignmentManager manager = RoomAlignmentManager.Instance;
+        if (manager == null || !manager.AttachVisualization(transform, "M0"))
         {
             ClearGeneratedTrajectory();
-            RequestGenerateWhenLiveMRUKRoomReady();
-            return;
+            yield break;
         }
 
+        datasetManaged = true;
+        coordinateFrameRoot = null;
         GenerateRawTrajectory();
         RememberAppliedAlignment();
     }
@@ -80,6 +86,22 @@ public class M0_RawTrajectory : MonoBehaviour
     {
         if (!Application.isPlaying)
         {
+            return;
+        }
+
+        if (!playbackDecisionReceived)
+        {
+            return;
+        }
+
+        if (datasetManaged)
+        {
+            if (!Mathf.Approximately(yawOffsetDegrees, lastAppliedYawOffsetDegrees) ||
+                positionOffset != lastAppliedPositionOffset)
+            {
+                GenerateRawTrajectory();
+                RememberAppliedAlignment();
+            }
             return;
         }
 
@@ -98,7 +120,14 @@ public class M0_RawTrajectory : MonoBehaviour
     [ContextMenu("Regenerate Raw Trajectory")]
     public void GenerateRawTrajectory()
     {
-        if (ShouldWaitForLiveMRUKRoom())
+        if (Application.isPlaying && (!datasetManaged || RoomAlignmentManager.Instance == null ||
+            RoomAlignmentManager.Instance.State != RoomAlignmentManager.PlaybackState.Ready))
+        {
+            Debug.LogWarning(RoomAlignmentManager.LogPrefix + " M0 generation deferred or rejected until UUID-matched playback is ready.");
+            return;
+        }
+
+        if (!datasetManaged && ShouldWaitForLiveMRUKRoom())
         {
             ClearGeneratedTrajectory();
             RequestGenerateWhenLiveMRUKRoomReady();
@@ -107,7 +136,10 @@ public class M0_RawTrajectory : MonoBehaviour
         }
 
         ClearGeneratedTrajectory();
-        ResolveCoordinateFrameRoot();
+        if (!datasetManaged)
+        {
+            ResolveCoordinateFrameRoot();
+        }
 
         string path = Path.Combine(Application.persistentDataPath, fileName);
 
@@ -233,9 +265,9 @@ public class M0_RawTrajectory : MonoBehaviour
 
         string[] headers = SplitCsvLine(lines[0]);
 
-        int xIndex = FindColumn(headers, "anchor_local_x", "local_pos_x", "pos_x", "world_pos_x");
-        int yIndex = FindColumn(headers, "anchor_local_y", "local_pos_y", "pos_y", "world_pos_y");
-        int zIndex = FindColumn(headers, "anchor_local_z", "local_pos_z", "pos_z", "world_pos_z");
+        int xIndex = FindColumn(headers, "reference_local_pos_x");
+        int yIndex = FindColumn(headers, "reference_local_pos_y");
+        int zIndex = FindColumn(headers, "reference_local_pos_z");
         int rssiIndex = FindColumn(headers, "rssi_dbm", "rssi", "rssiDbm");
         int anchorSourceIndex = FindColumn(headers, "anchor_source");
         int anchorNameIndex = FindColumn(headers, "anchor_name");
@@ -244,7 +276,7 @@ public class M0_RawTrajectory : MonoBehaviour
 
         if (xIndex < 0 || yIndex < 0 || zIndex < 0 || rssiIndex < 0)
         {
-            Debug.LogError("M0_RawTrajectory: CSV missing required columns. Need anchor_local_x/anchor_local_y/anchor_local_z, pos_x/pos_y/pos_z, or world_pos_x/world_pos_y/world_pos_z and rssi_dbm.");
+            Debug.LogError(RoomAlignmentManager.LogPrefix + " M0 rejected legacy CSV: authoritative reference_local_pos_* columns are required.");
             Debug.LogError("M0_RawTrajectory headers found: " + string.Join(" | ", headers));
             return samples;
         }
@@ -306,6 +338,11 @@ public class M0_RawTrajectory : MonoBehaviour
             };
 
             samples.Add(sample);
+        }
+
+        if (samples.Count > 0 && RoomAlignmentManager.Instance != null)
+        {
+            RoomAlignmentManager.Instance.ReportFirstTrajectorySample(samples[0].position);
         }
 
         return samples;
@@ -386,6 +423,11 @@ public class M0_RawTrajectory : MonoBehaviour
     {
         Vector3 nudgedFramePosition =
             Quaternion.Euler(0f, yawOffsetDegrees, 0f) * coordinateFrameLocalPosition + positionOffset;
+
+        if (datasetManaged)
+        {
+            return nudgedFramePosition;
+        }
 
         if (inputPositionsAreMeshLocal || csvPositionsAreMeshLocal)
         {

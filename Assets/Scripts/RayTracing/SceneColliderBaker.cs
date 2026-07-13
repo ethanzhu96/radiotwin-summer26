@@ -25,6 +25,7 @@ public class SceneColliderBaker : MonoBehaviour
     public bool addMissingMeshColliders = true;
     public bool assignLayer = true;
     public string rtLayerName = "RTScene";
+    public float meshWaitTimeoutSeconds = 8f;
 
     [Header("Debug")]
     public int bakedMeshCount;
@@ -61,8 +62,37 @@ public class SceneColliderBaker : MonoBehaviour
             }
         }
 
+        if (waitForMRUKRoom)
+        {
+            float timer = 0f;
+
+            while (CountResolvableMeshFilters() == 0 && timer < meshWaitTimeoutSeconds)
+            {
+                timer += Time.deltaTime;
+                yield return null;
+            }
+        }
+
         BakeNow();
         bakeRoutine = null;
+    }
+
+    private int CountResolvableMeshFilters()
+    {
+        List<Transform> roots = ResolveSceneRoots();
+        int count = 0;
+
+        for (int i = 0; i < roots.Count; i++)
+        {
+            if (roots[i] == null)
+            {
+                continue;
+            }
+
+            count += roots[i].GetComponentsInChildren<MeshFilter>(includeInactive).Length;
+        }
+
+        return count;
     }
 
     private void BakeNow()

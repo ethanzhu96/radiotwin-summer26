@@ -17,6 +17,8 @@ public class WifiPoseLogger : MonoBehaviour
     public bool requireMRUKRoomAnchorForLogging = true;
 
     public string fileName = "rf_trajectory_log.csv";
+    public string metadataFileName = RoomAlignmentManager.DefaultMetadataFileName;
+    public string meshFileName = "quest_room_mesh.obj";
     public float sampleIntervalSeconds = 1.0f;
 
     [Header("Logging Controls")]
@@ -41,6 +43,9 @@ public class WifiPoseLogger : MonoBehaviour
     private bool usingMRUKRoomAnchor = false;
     private string anchorSource = "NONE";
     private string anchorName = "NONE";
+    private Guid captureRoomUuid = Guid.Empty;
+    private Guid captureReferenceAnchorUuid = Guid.Empty;
+    private Quaternion captureReferenceFrameLocalRotation = Quaternion.identity;
 
 #if UNITY_ANDROID && !UNITY_EDITOR
     private AndroidJavaObject wifiManager;
@@ -115,13 +120,54 @@ public class WifiPoseLogger : MonoBehaviour
         anchorSource = "NONE";
         anchorName = "NONE";
 
-        if (preferMRUKRoomAnchor && MRUK.Instance != null && MRUK.Instance.GetCurrentRoom() != null)
+        if (preferMRUKRoomAnchor && MRUK.Instance != null && MRUK.Instance.IsInitialized && MRUK.Instance.GetCurrentRoom() != null)
         {
-            anchorTransform = MRUK.Instance.GetCurrentRoom().transform;
+            MRUKRoom room = MRUK.Instance.GetCurrentRoom();
+            Guid roomUuid = room.Anchor.Uuid;
+            if (roomUuid == Guid.Empty)
+            {
+                anchorTransform = null;
+                Debug.LogError(RoomAlignmentManager.LogPrefix + " Current MRUK room has an empty anchor UUID.");
+                return;
+            }
+
+            if (captureRoomUuid != Guid.Empty && roomUuid != captureRoomUuid)
+            {
+                anchorTransform = null;
+                Debug.LogError(RoomAlignmentManager.LogPrefix + " Recording room changed. Expected " + captureRoomUuid + " but current room is " + roomUuid + ". Row rejected.");
+                return;
+            }
+
+            MRUKAnchor referenceAnchor = null;
+            if (captureReferenceAnchorUuid != Guid.Empty)
+            {
+                foreach (MRUKAnchor candidate in room.Anchors)
+                {
+                    if (candidate.Anchor.Uuid == captureReferenceAnchorUuid)
+                    {
+                        referenceAnchor = candidate;
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                RoomAlignmentManager.TryGetCaptureReferenceAnchor(room, out referenceAnchor);
+            }
+
+            if (referenceAnchor == null)
+            {
+                anchorTransform = null;
+                Debug.LogError(RoomAlignmentManager.LogPrefix + " No valid global-mesh or floor scene anchor is available for capture.");
+                return;
+            }
+
+            anchorTransform = referenceAnchor.transform;
             usingMRUKRoomAnchor = true;
-            anchorSource = "MRUK";
+            anchorSource = "MRUK_SCENE_ANCHOR";
             anchorName = anchorTransform.name;
-            Debug.LogError("WIFI_POSE_LOGGER_USING_MRUK_ROOM_ANCHOR: " + anchorTransform.name);
+            Debug.Log(RoomAlignmentManager.LogPrefix + " Capture reference anchor ready: " + anchorTransform.name +
+                " roomUUID=" + roomUuid + " anchorUUID=" + referenceAnchor.Anchor.Uuid + " label=" + referenceAnchor.Label);
             return;
         }
 
@@ -155,7 +201,12 @@ public class WifiPoseLogger : MonoBehaviour
         if (isLogging)
         {
             ResolveRoomAnchor();
-            InitializeLogFileForSession();
+            if (!InitializeLogFileForSession())
+            {
+                isLogging = false;
+                ShowStatusMessage("ROOM REQUIRED");
+                return;
+            }
             Debug.LogError("WIFI_POSE_LOGGER_RESUMED");
             ShowStatusMessage(usingMRUKRoomAnchor ? "ROOM OK" : "WAIT ROOM");
         }
@@ -166,12 +217,39 @@ public class WifiPoseLogger : MonoBehaviour
         }
     }
 
-    void InitializeLogFileForSession()
+    bool InitializeLogFileForSession()
     {
         if (logFileInitialized)
         {
-            return;
+            return true;
         }
+
+        if (MRUK.Instance == null || !MRUK.Instance.IsInitialized || MRUK.Instance.GetCurrentRoom() == null)
+        {
+            Debug.LogError(RoomAlignmentManager.LogPrefix + " Cannot start capture: MRUK is not initialized or has no current room.");
+            return false;
+        }
+
+        MRUKRoom captureRoom = MRUK.Instance.GetCurrentRoom();
+        captureRoomUuid = captureRoom.Anchor.Uuid;
+        if (captureRoomUuid == Guid.Empty)
+        {
+            Debug.LogError(RoomAlignmentManager.LogPrefix + " Cannot start capture: current room UUID is empty.");
+            captureRoomUuid = Guid.Empty;
+            return false;
+        }
+
+        if (!RoomAlignmentManager.TryGetCaptureReferenceAnchor(captureRoom, out MRUKAnchor referenceAnchor))
+        {
+            Debug.LogError(RoomAlignmentManager.LogPrefix + " Cannot start capture: no stable global-mesh or floor scene anchor exists.");
+            return false;
+        }
+
+        captureReferenceAnchorUuid = referenceAnchor.Anchor.Uuid;
+        captureReferenceFrameLocalRotation = RoomAlignmentManager.GetUprightReferenceLocalRotation(referenceAnchor);
+
+        anchorTransform = referenceAnchor.transform;
+        usingMRUKRoomAnchor = true;
 
         string header =
             "timestamp_unix_ms," +
@@ -179,8 +257,8 @@ public class WifiPoseLogger : MonoBehaviour
             "world_rot_x,world_rot_y,world_rot_z,world_rot_w," +
             "anchor_pos_x,anchor_pos_y,anchor_pos_z," +
             "anchor_rot_x,anchor_rot_y,anchor_rot_z,anchor_rot_w," +
-            "anchor_local_x,anchor_local_y,anchor_local_z," +
-            "anchor_local_rot_x,anchor_local_rot_y,anchor_local_rot_z,anchor_local_rot_w," +
+            "reference_local_pos_x,reference_local_pos_y,reference_local_pos_z," +
+            "reference_local_rot_x,reference_local_rot_y,reference_local_rot_z,reference_local_rot_w," +
             "anchor_source,anchor_name," +
             "ssid,bssid,rssi_dbm,frequency_mhz,link_speed_mbps\n";
 
@@ -196,6 +274,34 @@ public class WifiPoseLogger : MonoBehaviour
         }
 
         logFileInitialized = true;
+        WriteDatasetMetadata(captureRoom, referenceAnchor);
+        Debug.Log(RoomAlignmentManager.LogPrefix + " Saved room UUID: " + captureRoomUuid);
+        Debug.Log(RoomAlignmentManager.LogPrefix + " Saved reference anchor UUID: " + captureReferenceAnchorUuid);
+        Debug.Log(RoomAlignmentManager.LogPrefix + " CSV path: " + filePath);
+        Debug.Log(RoomAlignmentManager.LogPrefix + " Positions and rotations are saved in matched MRUK scene-anchor-local coordinates.");
+        return true;
+    }
+
+    void WriteDatasetMetadata(MRUKRoom captureRoom, MRUKAnchor referenceAnchor)
+    {
+        RoomAlignmentMetadata metadata = new RoomAlignmentMetadata
+        {
+            roomUuid = captureRoomUuid.ToString(),
+            referenceAnchorUuid = captureReferenceAnchorUuid.ToString(),
+            referenceAnchorLabel = referenceAnchor.Label.ToString(),
+            referenceFrameLocalRotX = captureReferenceFrameLocalRotation.x,
+            referenceFrameLocalRotY = captureReferenceFrameLocalRotation.y,
+            referenceFrameLocalRotZ = captureReferenceFrameLocalRotation.z,
+            referenceFrameLocalRotW = captureReferenceFrameLocalRotation.w,
+            trajectoryFile = fileName,
+            meshFile = meshFileName,
+            captureTimestampUtc = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture)
+        };
+        string metadataPath = Path.Combine(Application.persistentDataPath, metadataFileName);
+        File.WriteAllText(metadataPath, JsonUtility.ToJson(metadata, true));
+        Debug.Log(RoomAlignmentManager.LogPrefix + " Capture room object: " + captureRoom.name);
+        Debug.Log(RoomAlignmentManager.LogPrefix + " Metadata path: " + metadataPath);
+        Debug.Log(RoomAlignmentManager.LogPrefix + " Mesh path: " + Path.Combine(Application.persistentDataPath, meshFileName));
     }
 
     void EnsureStatusDisplay()
@@ -286,8 +392,8 @@ public class WifiPoseLogger : MonoBehaviour
         if (anchorTransform != null)
         {
             anchorPos = anchorTransform.position;
-            anchorRot = anchorTransform.rotation;
-            anchorLocalPos = anchorTransform.InverseTransformPoint(worldPos);
+            anchorRot = anchorTransform.rotation * captureReferenceFrameLocalRotation;
+            anchorLocalPos = Quaternion.Inverse(anchorRot) * (worldPos - anchorPos);
             anchorLocalRot = Quaternion.Inverse(anchorRot) * worldRot;
         }
         else

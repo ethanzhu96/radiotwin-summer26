@@ -11,6 +11,7 @@ public static class QuestCaptureSync
 {
     private const string CsvFileName = "rf_trajectory_log.csv";
     private const string MeshFileName = "quest_room_mesh.obj";
+    private const string MetadataFileName = "rf_dataset_metadata.json";
     private const string MeshAssetPath = "Assets/ExportedMeshes/quest_room_mesh.obj";
     private const string GeneratedMeshAssetPath = "Assets/ExportedMeshes/quest_room_mesh_generated.asset";
     private const string GeneratedMeshPrefabPath = "Assets/ExportedMeshes/quest_room_mesh_generated.prefab";
@@ -33,10 +34,13 @@ public static class QuestCaptureSync
 
             string csvDevicePath = "/sdcard/Android/data/" + packageName + "/files/" + CsvFileName;
             string meshDevicePath = "/sdcard/Android/data/" + packageName + "/files/" + MeshFileName;
+            string metadataDevicePath = "/sdcard/Android/data/" + packageName + "/files/" + MetadataFileName;
             string projectRoot = Directory.GetParent(Application.dataPath).FullName;
             string csvProjectPath = Path.Combine(projectRoot, CsvFileName);
             string csvEditorPath = Path.Combine(Application.persistentDataPath, CsvFileName);
             string meshProjectPath = Path.Combine(projectRoot, MeshAssetPath);
+            string metadataProjectPath = Path.Combine(projectRoot, MetadataFileName);
+            string metadataEditorPath = Path.Combine(Application.persistentDataPath, MetadataFileName);
 
             Directory.CreateDirectory(Application.persistentDataPath);
             Directory.CreateDirectory(Path.GetDirectoryName(meshProjectPath));
@@ -52,6 +56,17 @@ public static class QuestCaptureSync
             }
 
             bool csvHasRoomAnchor = CsvHasNonIdentityAnchor(csvEditorPath);
+
+            PullRequiredFile(adbPath, metadataDevicePath, metadataProjectPath, "room-alignment metadata");
+            File.Copy(metadataProjectPath, metadataEditorPath, true);
+            RoomAlignmentMetadata metadata = JsonUtility.FromJson<RoomAlignmentMetadata>(File.ReadAllText(metadataEditorPath));
+            if (metadata == null || metadata.formatVersion < 3 ||
+                metadata.coordinateSpace != RoomAlignmentManager.CoordinateSpace ||
+                !Guid.TryParse(metadata.roomUuid, out Guid roomUuid) || roomUuid == Guid.Empty ||
+                !Guid.TryParse(metadata.referenceAnchorUuid, out Guid referenceAnchorUuid) || referenceAnchorUuid == Guid.Empty)
+            {
+                throw new InvalidDataException("Room-alignment metadata is missing valid format-v3 MRUK room and scene-anchor UUIDs.");
+            }
 
             PullRequiredFile(adbPath, meshDevicePath, meshProjectPath, "room mesh OBJ");
             string meshHash = HashFile(meshProjectPath);
@@ -72,13 +87,16 @@ public static class QuestCaptureSync
                 "CSV for visualizers: " + csvEditorPath + " (" + csvInfo.Length + " bytes, sha256 " + csvEditorHash + ")\n" +
                 "Project CSV: " + csvProjectPath + " (sha256 " + csvProjectHash + ")\n" +
                 "Mesh OBJ: " + meshProjectPath + " (" + meshInfo.Length + " bytes, sha256 " + meshHash + ")\n" +
+                "Room UUID: " + roomUuid + "\n" +
+                "Reference anchor UUID: " + referenceAnchorUuid + "\n" +
+                "Metadata: " + metadataEditorPath + "\n" +
                 "Unity mesh prefab: " + GeneratedMeshPrefabPath +
                 anchorWarning
             );
 
             EditorUtility.DisplayDialog(
                 csvHasRoomAnchor ? "Quest Capture Synced" : "Quest Capture Synced With Warning",
-                "Updated trajectory CSV and room mesh.\n\n" +
+                "Updated trajectory CSV, room UUID metadata, and room mesh.\n\n" +
                 (csvHasRoomAnchor ? "" : "WARNING: The CSV anchor is still identity/zero, so this trajectory will be misaligned. Rebuild/install the latest APK and redo the trajectory.\n\n") +
                 "Press R in Play Mode to regenerate the visualization.",
                 "OK"
@@ -318,7 +336,8 @@ public static class QuestCaptureSync
 
         if (source >= 0 && source < values.Length)
         {
-            return values[source].Trim().Replace("\"", "") == "MRUK";
+            string sourceName = values[source].Trim().Replace("\"", "");
+            return sourceName == "MRUK_SCENE_ANCHOR";
         }
 
         int px = Array.IndexOf(headers, "anchor_pos_x");

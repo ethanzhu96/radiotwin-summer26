@@ -1,0 +1,14 @@
+{
+    "formatVersion": 3,
+    "roomUuid": "b7e8b12e-a5e2-5bf2-d7e9-cf3999518f0c",
+    "referenceAnchorUuid": "babe13c9-f873-6148-a5cd-024a4b000b26",
+    "referenceAnchorLabel": "FLOOR",
+    "referenceFrameLocalRotX": 0.0,
+    "referenceFrameLocalRotY": 0.7071068286895752,
+    "referenceFrameLocalRotZ": 0.7071068286895752,
+    "referenceFrameLocalRotW": 2.9802322387695315e-8,
+    "coordinateSpace": "MRUK_SCENE_ANCHOR_LOCAL",
+    "trajectoryFile": "rf_trajectory_log.csv",
+    "meshFile": "quest_room_mesh.obj",
+    "captureTimestampUtc": "2026-07-13T17:01:04.5616460Z"
+}

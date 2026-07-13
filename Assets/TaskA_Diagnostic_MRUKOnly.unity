@@ -2765,7 +2765,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &533982259
 Transform:
   m_ObjectHideFlags: 0
@@ -4658,7 +4658,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!4 &1003292120
 Transform:
   m_ObjectHideFlags: 0
@@ -5902,6 +5902,10 @@ GameObject:
   - component: {fileID: 1346935834}
   - component: {fileID: 1346935831}
   - component: {fileID: 1346935830}
+  - component: {fileID: 1346935836}
+  - component: {fileID: 1346935835}
+  - component: {fileID: 1346935837}
+  - component: {fileID: 1346935838}
   m_Layer: 0
   m_Name: RT_Debug
   m_TagString: Untagged
@@ -5916,7 +5920,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1346935829}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: c4773f0abe628e44eb0c19b85ab72b65, type: 3}
   m_Name: 
@@ -5934,7 +5938,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1346935829}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 833cd600938ad184880ca128fe812e95, type: 3}
   m_Name: 
@@ -5994,6 +5998,124 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1346935835
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1346935829}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1d2b8b2e9e19b7345af21cd6d4ba4368, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::SingleRtProbeTester
+  tracer: {fileID: 1346935836}
+  tx: {fileID: 0}
+  rx: {fileID: 533982259}
+  line: {fileID: 0}
+  label: {fileID: 0}
+  autoFindRuntimeTx: 1
+  txLineOfSightVisualizer: {fileID: 0}
+  txMarkerNamePrefixes:
+  - TX_LOS_ANCHOR_
+  - TX_SPATIAL_ANCHOR_
+  - TX_MARKER_
+--- !u!114 &1346935836
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1346935829}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 85c754f27f9361d439b8ee0ddb919566, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::SimpleRayTracer
+  rtSceneMask:
+    serializedVersion: 2
+    m_Bits: 8
+  blockedRssiDb: -120
+  referenceRssiDb: -40
+  referenceDistance: 1
+  pathLossExponent: 2
+  endpointHitTolerance: 0.08
+  debugDraw: 0
+--- !u!114 &1346935837
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1346935829}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 28213128b45183d4292f313e707352f5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::RtFloorField
+  tracer: {fileID: 1346935836}
+  useLiveMRUKRoom: 1
+  coordinateFrameRoot: {fileID: 0}
+  fallbackRoomAnchorName: RoomAnchor
+  txTransform: {fileID: 0}
+  cellSize: 0.5
+  ueHeight: 1.7
+  floorY: 0
+  xRange: {x: -3, y: 3}
+  zRange: {x: -3, y: 3}
+  tileMaterial: {fileID: 0}
+  tileParent: {fileID: 0}
+  autoFindRuntimeTx: 1
+  txLineOfSightVisualizer: {fileID: 0}
+  txMarkerNamePrefixes:
+  - TX_LOS_ANCHOR_
+  - TX_SPATIAL_ANCHOR_
+  - TX_MARKER_
+  enableRightThumbstickToggle: 1
+  toggleButton: 8388608
+  startVisible: 0
+--- !u!114 &1346935838
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1346935829}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d7849dc85489d5044a1965ac8437ca10, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PathPickerInteractor
+  floorField: {fileID: 1346935837}
+  rayOrigin: {fileID: 126266616}
+  useOVRControllerPose: 1
+  controller: 2
+  trackingSpace: {fileID: 0}
+  pickMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  maxPickDistance: 10
+  losLineMaterial: {fileID: 0}
+  pathVisualParent: {fileID: 0}
+  label: {fileID: 0}
+  useKeyboardFallback: 1
+  useQuestTrigger: 1
+  pickButton: 2097152
+  primaryLocalRayDirection: {x: 0, y: 0, z: 1}
+  tryAlternateControllerAxes: 1
+  pickedHitMarker: {fileID: 0}
+  drawTxToPickedHitPoint: 1
+  alsoDrawCachedCellPaths: 0
+  drawPointerLine: 1
+  pointerOnlyWhilePicking: 0
+  pointerLine: {fileID: 0}
+  pointerHitColor: {r: 0, g: 1, b: 0, a: 1}
+  pointerMissColor: {r: 1, g: 0, b: 0, a: 1}
+  pointerLineWidth: 0.01
+  pathLineWidth: 0.025
+  markerRadius: 0.06
+  pointerVisibleSecondsAfterPick: 0.35
 --- !u!21 &1375769451
 Material:
   serializedVersion: 8
@@ -6724,7 +6846,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!4 &1628424978
 Transform:
   m_ObjectHideFlags: 0
@@ -6780,6 +6902,7 @@ MonoBehaviour:
   loadKey: 108
   eraseKey: 8
   placeButton: 1
+  placeButtonTogglesAnchor: 1
   loadButton: 8
 --- !u!1 &1667170363
 GameObject:

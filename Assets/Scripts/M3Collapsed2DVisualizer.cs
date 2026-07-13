@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -76,14 +77,25 @@ public class M3Collapsed2DVisualizer : MonoBehaviour
         }
     }
 
-    void Start()
+    IEnumerator Start()
     {
+        yield return RoomAlignmentManager.WaitForPlaybackDecision();
+        if (RoomAlignmentManager.Instance == null || !RoomAlignmentManager.Instance.AttachVisualization(transform, "M3"))
+        {
+            yield break;
+        }
+        coordinateFrameRoot = null;
         GenerateCollapsed2D();
     }
 
     [ContextMenu("Regenerate Collapsed 2D")]
     public void GenerateCollapsed2D()
     {
+        if (Application.isPlaying && (RoomAlignmentManager.Instance == null ||
+            RoomAlignmentManager.Instance.State != RoomAlignmentManager.PlaybackState.Ready))
+        {
+            return;
+        }
         ResolveCoordinateFrameRoot();
 
         if (clearOldTilesOnStart)
@@ -141,14 +153,14 @@ public class M3Collapsed2DVisualizer : MonoBehaviour
 
         string[] headers = SplitCsvLine(lines[0]);
 
-        int xIndex = FindColumn(headers, "anchor_local_x", "local_pos_x", "pos_x", "world_pos_x");
-        int yIndex = FindColumn(headers, "anchor_local_y", "local_pos_y", "pos_y", "world_pos_y");
-        int zIndex = FindColumn(headers, "anchor_local_z", "local_pos_z", "pos_z", "world_pos_z");
+        int xIndex = FindColumn(headers, "reference_local_pos_x");
+        int yIndex = FindColumn(headers, "reference_local_pos_y");
+        int zIndex = FindColumn(headers, "reference_local_pos_z");
         int rssiIndex = FindColumn(headers, "rssi_dbm", "rssi", "rssiDbm");
 
         if (xIndex < 0 || yIndex < 0 || zIndex < 0 || rssiIndex < 0)
         {
-            Debug.LogError("M3Collapsed2DVisualizer: CSV missing required columns. Need anchor_local_x/anchor_local_y/anchor_local_z, pos_x/pos_y/pos_z, or world_pos_x/world_pos_y/world_pos_z and rssi_dbm.");
+            Debug.LogError(RoomAlignmentManager.LogPrefix + " M3 rejected legacy CSV: authoritative reference_local_pos_* columns are required.");
             Debug.LogError("M3Collapsed2DVisualizer headers found: " + string.Join(" | ", headers));
             return samples;
         }
@@ -435,6 +447,12 @@ public class M3Collapsed2DVisualizer : MonoBehaviour
 
     private void ResolveCoordinateFrameRoot()
     {
+        if (transform.parent != null && transform.parent.name == "DatasetRoot")
+        {
+            coordinateFrameRoot = null;
+            return;
+        }
+
         if (coordinateFrameRoot != null)
         {
             return;
