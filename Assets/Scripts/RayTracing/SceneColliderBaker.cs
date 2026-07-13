@@ -1,39 +1,62 @@
 using System.Collections;
 using System.Collections.Generic;
-using UnityEngine;
 using Meta.XR.MRUtilityKit;
+using UnityEngine;
 
-/*
-Inspector setup:
-- Add this script to an active GameObject in the scene.
-- Optional: assign Scene Roots to EffectMesh, RoomAnchor, or any reconstructed room mesh root.
-- If Scene Roots is empty, it tries the live MRUK room first, then a GameObject named RoomAnchor.
-- Set RT Layer Name to the layer your RaycastSmokeTest mask uses, usually RTScene.
-- Press the context menu "Bake Scene Colliders" or leave Bake On Start enabled.
-*/
+[System.Serializable]
+public struct RtSurfaceTriangle
+{
+    public Vector3 pointAWorld;
+    public Vector3 pointBWorld;
+    public Vector3 pointCWorld;
+    public Vector3 normalWorld;
+    public float area;
+}
+
 public class SceneColliderBaker : MonoBehaviour
 {
-    [Header("Scene Roots")]
-    public Transform[] sceneRoots;
-    public bool autoUseLiveMRUKRoom = true;
-    public string fallbackRoomAnchorName = "RoomAnchor";
-    public bool includeInactive = false;
-
     [Header("Collider Setup")]
-    public bool bakeOnStart = true;
-    public bool waitForMRUKRoom = true;
-    public bool addMissingMeshColliders = true;
-    public bool assignLayer = true;
-    public string rtLayerName = "RTScene";
-    public float meshWaitTimeoutSeconds = 8f;
+    [SerializeField] private bool bakeOnStart = true;
+    [SerializeField] private bool includeInactive;
+    [SerializeField] private string rtLayerName = "RTScene";
+    [SerializeField] private int maximumReflectionTriangles = 128;
+    [SerializeField] private float minimumReflectionTriangleArea = 0.02f;
+    [SerializeField] private WedgeEdgeExtractor wedgeExtractor;
 
     [Header("Debug")]
-    public int bakedMeshCount;
-    public int bakedColliderCount;
+    [SerializeField] private int meshFiltersFound;
+    [SerializeField] private int existingCollidersReused;
+    [SerializeField] private int meshCollidersAdded;
+    [SerializeField] private int invalidMeshesSkipped;
 
+    private readonly List<MeshCollider> preparedColliders = new List<MeshCollider>();
+    private readonly List<RtSurfaceTriangle> surfaceTriangles = new List<RtSurfaceTriangle>();
     private Coroutine bakeRoutine;
 
-    void Start()
+    public bool IsReady { get; private set; }
+    public int PreparedColliderCount => preparedColliders.Count;
+    public IReadOnlyList<RtSurfaceTriangle> SurfaceTriangles => surfaceTriangles;
+    public IReadOnlyList<RtWedgeEdge> Wedges => wedgeExtractor != null
+        ? wedgeExtractor.Wedges
+        : System.Array.Empty<RtWedgeEdge>();
+    public int EnabledColliderCount
+    {
+        get
+        {
+            int count = 0;
+            for (int i = 0; i < preparedColliders.Count; i++)
+            {
+                if (preparedColliders[i] != null && preparedColliders[i].enabled &&
+                    preparedColliders[i].gameObject.activeInHierarchy)
+                {
+                    count++;
+                }
+            }
+            return count;
+        }
+    }
+
+    private void Start()
     {
         if (bakeOnStart)
         {
@@ -44,137 +67,71 @@ public class SceneColliderBaker : MonoBehaviour
     [ContextMenu("Bake Scene Colliders")]
     public void BakeSceneColliders()
     {
+        if (!isActiveAndEnabled)
+        {
+            Debug.LogWarning("[SceneColliderBaker] Component is disabled; collider preparation cannot start.");
+            return;
+        }
+
         if (bakeRoutine != null)
         {
             StopCoroutine(bakeRoutine);
         }
-
-        bakeRoutine = StartCoroutine(BakeWhenReady());
+        IsReady = false;
+        bakeRoutine = StartCoroutine(BakeWhenAlignmentReady());
     }
 
-    private IEnumerator BakeWhenReady()
+    private IEnumerator BakeWhenAlignmentReady()
     {
-        if (waitForMRUKRoom && autoUseLiveMRUKRoom)
+        RoomAlignmentManager manager = RoomAlignmentManager.EnsureInstance();
+        while (manager.State == RoomAlignmentManager.PlaybackState.WaitingForMRUK)
         {
-            while (MRUK.Instance == null || MRUK.Instance.GetCurrentRoom() == null)
-            {
-                yield return null;
-            }
+            yield return null;
         }
 
-        if (waitForMRUKRoom)
+        if (manager.State != RoomAlignmentManager.PlaybackState.Ready ||
+            manager.MatchedRoom == null || manager.DatasetRoot == null)
         {
-            float timer = 0f;
-
-            while (CountResolvableMeshFilters() == 0 && timer < meshWaitTimeoutSeconds)
-            {
-                timer += Time.deltaTime;
-                yield return null;
-            }
+            Debug.LogError("[SceneColliderBaker] UUID-matched room alignment was not ready. Collider preparation aborted.");
+            bakeRoutine = null;
+            yield break;
         }
 
-        BakeNow();
+        yield return null;
+        BakeMatchedRoom(manager.MatchedRoom, manager.DatasetRoot);
         bakeRoutine = null;
     }
 
-    private int CountResolvableMeshFilters()
+    private void BakeMatchedRoom(MRUKRoom matchedRoom, Transform datasetRoot)
     {
-        List<Transform> roots = ResolveSceneRoots();
-        int count = 0;
-
-        for (int i = 0; i < roots.Count; i++)
-        {
-            if (roots[i] == null)
-            {
-                continue;
-            }
-
-            count += roots[i].GetComponentsInChildren<MeshFilter>(includeInactive).Length;
-        }
-
-        return count;
-    }
-
-    private void BakeNow()
-    {
-        bakedMeshCount = 0;
-        bakedColliderCount = 0;
-
+        ResetCounts();
         int rtLayer = LayerMask.NameToLayer(rtLayerName);
-        if (assignLayer && rtLayer < 0)
+        if (rtLayer < 0)
         {
-            Debug.LogWarning("SceneColliderBaker: layer '" + rtLayerName + "' does not exist. Colliders will keep their current layer.");
-        }
-
-        List<Transform> roots = ResolveSceneRoots();
-
-        for (int i = 0; i < roots.Count; i++)
-        {
-            BakeRoot(roots[i], rtLayer);
-        }
-
-        Debug.Log("SceneColliderBaker: baked " + bakedColliderCount + " MeshColliders from " + bakedMeshCount + " MeshFilters.");
-    }
-
-    private List<Transform> ResolveSceneRoots()
-    {
-        List<Transform> roots = new List<Transform>();
-
-        if (sceneRoots != null)
-        {
-            for (int i = 0; i < sceneRoots.Length; i++)
-            {
-                if (sceneRoots[i] != null && !roots.Contains(sceneRoots[i]))
-                {
-                    roots.Add(sceneRoots[i]);
-                }
-            }
-        }
-
-        if (roots.Count == 0 && autoUseLiveMRUKRoom && MRUK.Instance != null && MRUK.Instance.GetCurrentRoom() != null)
-        {
-            roots.Add(MRUK.Instance.GetCurrentRoom().transform);
-        }
-
-        if (roots.Count == 0)
-        {
-            GameObject fallback = GameObject.Find(fallbackRoomAnchorName);
-            if (fallback != null)
-            {
-                roots.Add(fallback.transform);
-            }
-        }
-
-        return roots;
-    }
-
-    private void BakeRoot(Transform root, int rtLayer)
-    {
-        if (root == null)
-        {
+            Debug.LogError("[SceneColliderBaker] Layer '" + rtLayerName +
+                "' does not exist. Add RTScene in Project Settings > Tags and Layers, then rebuild.");
             return;
         }
 
-        MeshFilter[] meshFilters = root.GetComponentsInChildren<MeshFilter>(includeInactive);
+        Debug.Log("[SceneColliderBaker] Matched room: " + matchedRoom.name +
+            " UUID=" + matchedRoom.Anchor.Uuid);
 
+        MeshFilter[] meshFilters = matchedRoom.GetComponentsInChildren<MeshFilter>(includeInactive);
+        meshFiltersFound = meshFilters.Length;
+        List<MeshFilter> validRoomMeshes = new List<MeshFilter>();
         for (int i = 0; i < meshFilters.Length; i++)
         {
             MeshFilter meshFilter = meshFilters[i];
-
-            if (meshFilter.sharedMesh == null)
+            if (!IsRuntimeRoomGeometry(meshFilter, matchedRoom, datasetRoot))
             {
+                invalidMeshesSkipped++;
                 continue;
             }
 
-            bakedMeshCount++;
-
-            if (assignLayer && rtLayer >= 0)
+            Mesh mesh = meshFilter.sharedMesh;
+            if (mesh == null || mesh.vertexCount < 3 || mesh.subMeshCount == 0 || mesh.GetIndexCount(0) < 3)
             {
-                meshFilter.gameObject.layer = rtLayer;
-            }
-
-            if (!addMissingMeshColliders)
-            {
+                invalidMeshesSkipped++;
                 continue;
             }
 
@@ -182,11 +139,139 @@ public class SceneColliderBaker : MonoBehaviour
             if (meshCollider == null)
             {
                 meshCollider = meshFilter.gameObject.AddComponent<MeshCollider>();
+                meshCollidersAdded++;
+            }
+            else
+            {
+                existingCollidersReused++;
             }
 
-            meshCollider.sharedMesh = meshFilter.sharedMesh;
+            meshCollider.sharedMesh = mesh;
             meshCollider.convex = false;
-            bakedColliderCount++;
+            meshCollider.enabled = true;
+            meshFilter.gameObject.layer = rtLayer;
+            if (!preparedColliders.Contains(meshCollider))
+            {
+                preparedColliders.Add(meshCollider);
+            }
+            validRoomMeshes.Add(meshFilter);
         }
+
+        CacheSurfaceTriangles(validRoomMeshes);
+        if (wedgeExtractor == null)
+        {
+            wedgeExtractor = GetComponent<WedgeEdgeExtractor>();
+        }
+        if (wedgeExtractor == null)
+        {
+            wedgeExtractor = gameObject.AddComponent<WedgeEdgeExtractor>();
+        }
+        wedgeExtractor.Extract(validRoomMeshes);
+
+        IsReady = preparedColliders.Count > 0;
+        Debug.Log("[SceneColliderBaker] Mesh filters found: " + meshFiltersFound);
+        Debug.Log("[SceneColliderBaker] Existing MeshColliders reused: " + existingCollidersReused);
+        Debug.Log("[SceneColliderBaker] MeshColliders added: " + meshCollidersAdded);
+        Debug.Log("[SceneColliderBaker] Invalid meshes skipped: " + invalidMeshesSkipped);
+        Debug.Log("[SceneColliderBaker] RTScene layer index: " + rtLayer);
+        Debug.Log("[SceneColliderBaker] Reflection triangles cached: " + surfaceTriangles.Count);
+        Debug.Log("[SceneColliderBaker] Wedge candidates cached: " + Wedges.Count);
+        if (IsReady)
+        {
+            Debug.Log("[SceneColliderBaker] Collider preparation complete. Prepared=" + preparedColliders.Count + ".");
+        }
+        else
+        {
+            Debug.LogError("[SceneColliderBaker] No valid runtime MRUK room meshes were found under the UUID-matched room.");
+        }
+    }
+
+    private static bool IsRuntimeRoomGeometry(MeshFilter meshFilter, MRUKRoom matchedRoom, Transform datasetRoot)
+    {
+        if (meshFilter == null || !meshFilter.gameObject.scene.IsValid())
+        {
+            return false;
+        }
+        if (datasetRoot != null && (meshFilter.transform == datasetRoot || meshFilter.transform.IsChildOf(datasetRoot)))
+        {
+            return false;
+        }
+
+        MRUKAnchor anchor = meshFilter.GetComponentInParent<MRUKAnchor>();
+        return anchor != null && anchor.GetComponentInParent<MRUKRoom>() == matchedRoom;
+    }
+
+    private void ResetCounts()
+    {
+        preparedColliders.Clear();
+        surfaceTriangles.Clear();
+        meshFiltersFound = 0;
+        existingCollidersReused = 0;
+        meshCollidersAdded = 0;
+        invalidMeshesSkipped = 0;
+        IsReady = false;
+    }
+
+    private void CacheSurfaceTriangles(IReadOnlyList<MeshFilter> meshFilters)
+    {
+        surfaceTriangles.Clear();
+        List<RtSurfaceTriangle> candidates = new List<RtSurfaceTriangle>();
+        for (int meshIndex = 0; meshIndex < meshFilters.Count; meshIndex++)
+        {
+            MeshFilter meshFilter = meshFilters[meshIndex];
+            try
+            {
+                Vector3[] vertices = meshFilter.sharedMesh.vertices;
+                int[] triangles = meshFilter.sharedMesh.triangles;
+                for (int i = 0; i + 2 < triangles.Length; i += 3)
+                {
+                    Vector3 a = meshFilter.transform.TransformPoint(vertices[triangles[i]]);
+                    Vector3 b = meshFilter.transform.TransformPoint(vertices[triangles[i + 1]]);
+                    Vector3 c = meshFilter.transform.TransformPoint(vertices[triangles[i + 2]]);
+                    Vector3 cross = Vector3.Cross(b - a, c - a);
+                    float area = cross.magnitude * 0.5f;
+                    if (area < minimumReflectionTriangleArea)
+                    {
+                        continue;
+                    }
+                    candidates.Add(new RtSurfaceTriangle
+                    {
+                        pointAWorld = a,
+                        pointBWorld = b,
+                        pointCWorld = c,
+                        normalWorld = cross.normalized,
+                        area = area
+                    });
+                }
+            }
+            catch (System.Exception exception)
+            {
+                Debug.LogWarning("[SceneColliderBaker] Could not cache triangles for '" +
+                    meshFilter.name + "': " + exception.Message);
+            }
+        }
+
+        candidates.Sort((left, right) => right.area.CompareTo(left.area));
+        int count = Mathf.Min(maximumReflectionTriangles, candidates.Count);
+        for (int i = 0; i < count; i++)
+        {
+            surfaceTriangles.Add(candidates[i]);
+        }
+    }
+
+    public string GetColliderSummary(int maxEntries)
+    {
+        List<string> entries = new List<string>();
+        int count = Mathf.Min(maxEntries, preparedColliders.Count);
+        for (int i = 0; i < count; i++)
+        {
+            MeshCollider collider = preparedColliders[i];
+            if (collider != null)
+            {
+                entries.Add(collider.name + "(" + LayerMask.LayerToName(collider.gameObject.layer) +
+                    ", enabled=" + collider.enabled + ")");
+            }
+        }
+        return entries.Count > 0 ? string.Join(", ", entries) : "none";
     }
 }

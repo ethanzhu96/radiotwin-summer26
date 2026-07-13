@@ -1,38 +1,27 @@
 using System.Collections.Generic;
 using UnityEngine;
-using Meta.XR.MRUtilityKit;
 
-/*
-Inspector setup:
-- Add this to an active GameObject, usually RT_Debug.
-- Assign Tracer to SimpleRayTracer.
-- Assign Coordinate Frame Root to RoomAnchor or the live room frame used by M1.
-- Assign Tx Transform to a temporary/static Tx object for now.
-- Use the context menu "Generate RT Field" to compute tiles on demand.
-*/
 public class RtFloorField : MonoBehaviour
 {
     public class RtCell
     {
         public Vector2Int index;
+        public Vector3 rxLocal;
         public Vector3 rxWorld;
         public float predictedRssiDb;
         public List<RtPath> paths;
         public GameObject tileObject;
     }
 
+    [Header("Dependencies")]
     public SimpleRayTracer tracer;
-
-    [Header("Coordinate Frame")]
-    public bool useLiveMRUKRoom = true;
-    public Transform coordinateFrameRoot;
-    public string fallbackRoomAnchorName = "RoomAnchor";
+    [SerializeField] private SceneColliderBaker colliderBaker;
 
     [Header("Tx / Grid")]
     public Transform txTransform;
     public float cellSize = 0.5f;
     public float ueHeight = 1.7f;
-    public float floorY = 0f;
+    public float floorY = 0.01f;
     public Vector2 xRange = new Vector2(-3f, 3f);
     public Vector2 zRange = new Vector2(-3f, 3f);
     public Material tileMaterial;
@@ -48,24 +37,32 @@ public class RtFloorField : MonoBehaviour
         "TX_MARKER_"
     };
 
-    [Header("Toggle")]
+    [Header("Analyze Mode")]
     public bool enableRightThumbstickToggle = true;
     public OVRInput.Button toggleButton = OVRInput.Button.SecondaryThumbstick;
-    public bool startVisible = false;
+    public bool startVisible;
 
     private readonly Dictionary<Vector2Int, RtCell> cells = new Dictionary<Vector2Int, RtCell>();
     private bool isVisible;
+    private Transform coordinateFrameRoot;
 
     public Transform CurrentTxTransform => txTransform;
+    public Transform CoordinateFrameRoot => coordinateFrameRoot;
     public bool HasCells => cells.Count > 0;
+    public bool IsComputed { get; private set; }
+    public bool IsAnalyzeModeActive => isVisible;
 
-    void Start()
+    private void Start()
     {
+        if (colliderBaker == null)
+        {
+            colliderBaker = FindFirstObjectByType<SceneColliderBaker>();
+        }
         isVisible = startVisible;
         SetTilesVisible(isVisible);
     }
 
-    void Update()
+    private void Update()
     {
         if (enableRightThumbstickToggle && OVRInput.GetDown(toggleButton))
         {
@@ -73,7 +70,7 @@ public class RtFloorField : MonoBehaviour
         }
     }
 
-    void OnDisable()
+    private void OnDisable()
     {
         SetTilesVisible(false);
     }
@@ -81,29 +78,36 @@ public class RtFloorField : MonoBehaviour
     [ContextMenu("Generate RT Field")]
     public void GenerateField()
     {
-        ResolveCoordinateFrameRoot();
-        ResolveRuntimeTx();
+        IsComputed = false;
+        if (!ResolveCoordinateFrameRoot())
+        {
+            Debug.LogWarning("[RtFloorField] UUID alignment is not ready; field generation rejected.");
+            return;
+        }
 
+        if (colliderBaker == null)
+        {
+            colliderBaker = FindFirstObjectByType<SceneColliderBaker>();
+        }
+        if (colliderBaker == null || !colliderBaker.IsReady)
+        {
+            Debug.LogWarning("[RtFloorField] Matched-room colliders are not ready.");
+            return;
+        }
+
+        ResolveRuntimeTx();
         if (tracer == null)
         {
-            Debug.LogWarning("RtFloorField: tracer is missing.");
+            Debug.LogWarning("[RtFloorField] SimpleRayTracer is missing.");
             return;
         }
-
-        if (coordinateFrameRoot == null)
-        {
-            Debug.LogWarning("RtFloorField: coordinateFrameRoot is missing. Live MRUK room and fallback RoomAnchor were not found.");
-            return;
-        }
-
         if (txTransform == null)
         {
-            Debug.LogWarning("RtFloorField: txTransform is missing.");
+            Debug.LogWarning("[RtFloorField] Place or load the Tx before computing the field.");
             return;
         }
 
         ClearOldTiles();
-
         float safeCellSize = Mathf.Max(cellSize, 0.001f);
         int minGx = Mathf.FloorToInt(xRange.x / safeCellSize);
         int maxGx = Mathf.FloorToInt(xRange.y / safeCellSize);
@@ -116,7 +120,6 @@ public class RtFloorField : MonoBehaviour
             {
                 Vector2Int index = new Vector2Int(gx, gz);
                 Vector3 floorLocal = GridIndexToFloorLocal(index, safeCellSize);
-
                 if (floorLocal.x < xRange.x || floorLocal.x > xRange.y ||
                     floorLocal.z < zRange.x || floorLocal.z > zRange.y)
                 {
@@ -126,37 +129,35 @@ public class RtFloorField : MonoBehaviour
                 Vector3 rxLocal = new Vector3(floorLocal.x, floorY + ueHeight, floorLocal.z);
                 Vector3 rxWorld = coordinateFrameRoot.TransformPoint(rxLocal);
                 List<RtPath> paths = tracer.Trace(txTransform.position, rxWorld, out float rssi);
-
-                RtCell cell = new RtCell
+                cells[index] = new RtCell
                 {
                     index = index,
+                    rxLocal = rxLocal,
                     rxWorld = rxWorld,
                     predictedRssiDb = rssi,
                     paths = paths,
                     tileObject = CreateTile(index, floorLocal, rssi)
                 };
-
-                cells[index] = cell;
             }
         }
 
-        Debug.Log("RtFloorField: generated " + cells.Count + " LOS floor cells using frame " + coordinateFrameRoot.name + ".");
+        IsComputed = cells.Count > 0;
         SetTilesVisible(isVisible);
+        Debug.Log("[RtFloorField] Generated " + cells.Count + " cached RT cells in DatasetRoot frame '" +
+            coordinateFrameRoot.name + "' at cellSize=" + safeCellSize + " ueHeight=" + ueHeight + ".");
     }
 
-    [ContextMenu("Toggle RT Field")]
+    [ContextMenu("Toggle RT Analyze Mode")]
     public void ToggleField()
     {
         isVisible = !isVisible;
-
-        if (isVisible && cells.Count == 0)
+        if (isVisible && !IsComputed)
         {
             GenerateField();
-            isVisible = true;
         }
-
-        SetTilesVisible(isVisible);
-        Debug.Log("RtFloorField: " + (isVisible ? "shown" : "hidden"));
+        SetTilesVisible(isVisible && IsComputed);
+        Debug.Log("[RtFloorField] Analyze mode " + (isVisible ? "enabled" : "disabled") +
+            "; fieldComputed=" + IsComputed + ".");
     }
 
     public bool TryGetCell(Vector2Int index, out RtCell cell)
@@ -164,16 +165,27 @@ public class RtFloorField : MonoBehaviour
         return cells.TryGetValue(index, out cell);
     }
 
+    public bool TryGetTxTransform(out Transform tx)
+    {
+        ResolveRuntimeTx();
+        tx = txTransform;
+        return tx != null;
+    }
+
     public Vector2Int WorldToGridIndex(Vector3 worldPoint)
     {
         Vector3 localPoint = coordinateFrameRoot != null
             ? coordinateFrameRoot.InverseTransformPoint(worldPoint)
             : worldPoint;
-
         float safeCellSize = Mathf.Max(cellSize, 0.001f);
-        int gx = Mathf.FloorToInt(localPoint.x / safeCellSize);
-        int gz = Mathf.FloorToInt(localPoint.z / safeCellSize);
-        return new Vector2Int(gx, gz);
+        return new Vector2Int(
+            Mathf.FloorToInt(localPoint.x / safeCellSize),
+            Mathf.FloorToInt(localPoint.z / safeCellSize));
+    }
+
+    public Vector3 GridIndexToFloorLocal(Vector2Int index)
+    {
+        return GridIndexToFloorLocal(index, Mathf.Max(cellSize, 0.001f));
     }
 
     private Vector3 GridIndexToFloorLocal(Vector2Int index, float safeCellSize)
@@ -181,28 +193,21 @@ public class RtFloorField : MonoBehaviour
         return new Vector3(
             (index.x + 0.5f) * safeCellSize,
             floorY,
-            (index.y + 0.5f) * safeCellSize
-        );
+            (index.y + 0.5f) * safeCellSize);
     }
 
-    private void ResolveCoordinateFrameRoot()
+    private bool ResolveCoordinateFrameRoot()
     {
-        if (useLiveMRUKRoom && MRUK.Instance != null && MRUK.Instance.GetCurrentRoom() != null)
+        RoomAlignmentManager manager = RoomAlignmentManager.Instance;
+        if (manager == null || manager.State != RoomAlignmentManager.PlaybackState.Ready ||
+            manager.DatasetRoot == null)
         {
-            coordinateFrameRoot = MRUK.Instance.GetCurrentRoom().transform;
-            return;
+            coordinateFrameRoot = null;
+            return false;
         }
 
-        if (coordinateFrameRoot != null)
-        {
-            return;
-        }
-
-        GameObject fallback = GameObject.Find(fallbackRoomAnchorName);
-        if (fallback != null)
-        {
-            coordinateFrameRoot = fallback.transform;
-        }
+        coordinateFrameRoot = manager.DatasetRoot;
+        return true;
     }
 
     private void ResolveRuntimeTx()
@@ -211,49 +216,29 @@ public class RtFloorField : MonoBehaviour
         {
             return;
         }
-
+        if (txLineOfSightVisualizer == null)
+        {
+            txLineOfSightVisualizer = FindFirstObjectByType<TxLineOfSightVisualizer>();
+        }
         if (txLineOfSightVisualizer != null && txLineOfSightVisualizer.HasTxMarker())
         {
             txTransform = txLineOfSightVisualizer.CurrentMarkerTransform;
             return;
         }
-
         if (txTransform != null && IsRuntimeTxMarker(txTransform.name))
         {
             return;
         }
 
-        if (txLineOfSightVisualizer == null)
-        {
-            txLineOfSightVisualizer = FindFirstObjectByType<TxLineOfSightVisualizer>();
-        }
-
-        if (txLineOfSightVisualizer != null && txLineOfSightVisualizer.HasTxMarker())
-        {
-            txTransform = txLineOfSightVisualizer.CurrentMarkerTransform;
-            return;
-        }
-
-        Transform marker = FindRuntimeTxMarkerByName();
-        if (marker != null)
-        {
-            txTransform = marker;
-        }
-    }
-
-    private Transform FindRuntimeTxMarkerByName()
-    {
         Transform[] transforms = FindObjectsByType<Transform>(FindObjectsSortMode.None);
-
         for (int i = 0; i < transforms.Length; i++)
         {
             if (IsRuntimeTxMarker(transforms[i].name))
             {
-                return transforms[i];
+                txTransform = transforms[i];
+                return;
             }
         }
-
-        return null;
     }
 
     private bool IsRuntimeTxMarker(string objectName)
@@ -262,109 +247,78 @@ public class RtFloorField : MonoBehaviour
         {
             return false;
         }
-
         for (int i = 0; i < txMarkerNamePrefixes.Length; i++)
         {
-            string prefix = txMarkerNamePrefixes[i];
-
-            if (!string.IsNullOrEmpty(prefix) && objectName.StartsWith(prefix))
+            if (!string.IsNullOrEmpty(txMarkerNamePrefixes[i]) &&
+                objectName.StartsWith(txMarkerNamePrefixes[i]))
             {
                 return true;
             }
         }
-
         return false;
     }
 
     private GameObject CreateTile(Vector2Int index, Vector3 floorLocal, float rssi)
     {
         Transform parent = tileParent != null ? tileParent : transform;
-        Vector3 worldPosition = coordinateFrameRoot.TransformPoint(floorLocal);
-        Quaternion worldRotation = coordinateFrameRoot.rotation * Quaternion.Euler(90f, 0f, 0f);
-
         GameObject tile = GameObject.CreatePrimitive(PrimitiveType.Quad);
         tile.name = "RT_TILE_" + index.x + "_" + index.y + "_" + rssi.ToString("F1");
         tile.transform.SetParent(parent, true);
-        tile.transform.SetPositionAndRotation(worldPosition, worldRotation);
+        tile.transform.SetPositionAndRotation(
+            coordinateFrameRoot.TransformPoint(floorLocal),
+            coordinateFrameRoot.rotation * Quaternion.Euler(90f, 0f, 0f));
         tile.transform.localScale = new Vector3(cellSize, cellSize, 1f);
 
+        int ignoreRaycast = LayerMask.NameToLayer("Ignore Raycast");
+        if (ignoreRaycast >= 0)
+        {
+            tile.layer = ignoreRaycast;
+        }
         Collider collider = tile.GetComponent<Collider>();
         if (collider != null)
         {
             Destroy(collider);
         }
-
         Renderer renderer = tile.GetComponent<Renderer>();
         if (renderer != null)
         {
             Material material = tileMaterial != null
                 ? new Material(tileMaterial)
                 : new Material(Shader.Find("Standard"));
-
             material.color = RssiToColor(rssi);
             renderer.material = material;
         }
-
         return tile;
     }
 
     private void ClearOldTiles()
     {
-        foreach (KeyValuePair<Vector2Int, RtCell> kvp in cells)
+        foreach (KeyValuePair<Vector2Int, RtCell> entry in cells)
         {
-            if (kvp.Value.tileObject != null)
+            if (entry.Value.tileObject != null)
             {
-                DestroyObject(kvp.Value.tileObject);
+                Destroy(entry.Value.tileObject);
             }
         }
-
         cells.Clear();
-
-        Transform parent = tileParent != null ? tileParent : transform;
-        List<GameObject> oldTiles = new List<GameObject>();
-
-        foreach (Transform child in parent)
-        {
-            if (child.name.StartsWith("RT_TILE_"))
-            {
-                oldTiles.Add(child.gameObject);
-            }
-        }
-
-        for (int i = 0; i < oldTiles.Count; i++)
-        {
-            DestroyObject(oldTiles[i]);
-        }
+        IsComputed = false;
     }
 
     private void SetTilesVisible(bool visible)
     {
-        foreach (KeyValuePair<Vector2Int, RtCell> kvp in cells)
+        foreach (KeyValuePair<Vector2Int, RtCell> entry in cells)
         {
-            if (kvp.Value.tileObject != null)
+            if (entry.Value.tileObject != null)
             {
-                kvp.Value.tileObject.SetActive(visible);
+                entry.Value.tileObject.SetActive(visible);
             }
-        }
-    }
-
-    private void DestroyObject(GameObject obj)
-    {
-        if (Application.isPlaying)
-        {
-            Destroy(obj);
-        }
-        else
-        {
-            DestroyImmediate(obj);
         }
     }
 
     private Color RssiToColor(float rssi)
     {
-        float weak = tracer != null ? tracer.blockedRssiDb : -120f;
-        float strong = tracer != null ? tracer.referenceRssiDb : -40f;
-        float t = Mathf.InverseLerp(weak, strong, rssi);
-        return Color.Lerp(Color.blue, Color.red, t);
+        float weak = tracer != null ? tracer.BlockedRssiDb : -120f;
+        float strong = tracer != null ? tracer.ReferenceRssiDb : -40f;
+        return Color.Lerp(Color.blue, Color.red, Mathf.InverseLerp(weak, strong, rssi));
     }
 }

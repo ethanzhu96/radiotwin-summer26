@@ -925,6 +925,11 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 400002, guid: 126d619cf4daa52469682f85c1378b4a, type: 3}
   m_PrefabInstance: {fileID: 126266614}
   m_PrefabAsset: {fileID: 0}
+--- !u!4 &126266619 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 4484591312116288, guid: 126d619cf4daa52469682f85c1378b4a, type: 3}
+  m_PrefabInstance: {fileID: 126266614}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &136908412
 GameObject:
   m_ObjectHideFlags: 0
@@ -5906,6 +5911,9 @@ GameObject:
   - component: {fileID: 1346935835}
   - component: {fileID: 1346935837}
   - component: {fileID: 1346935838}
+  - component: {fileID: 1346935839}
+  - component: {fileID: 1346935840}
+  - component: {fileID: 1346935841}
   m_Layer: 0
   m_Name: RT_Debug
   m_TagString: Untagged
@@ -5938,22 +5946,21 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1346935829}
-  m_Enabled: 0
+  m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 833cd600938ad184880ca128fe812e95, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SceneColliderBaker
-  sceneRoots: []
-  autoUseLiveMRUKRoom: 1
-  fallbackRoomAnchorName: RoomAnchor
-  includeInactive: 0
   bakeOnStart: 1
-  waitForMRUKRoom: 1
-  addMissingMeshColliders: 1
-  assignLayer: 1
+  includeInactive: 0
   rtLayerName: RTScene
-  bakedMeshCount: 0
-  bakedColliderCount: 0
+  maximumReflectionTriangles: 128
+  minimumReflectionTriangleArea: 0.02
+  wedgeExtractor: {fileID: 1346935841}
+  meshFiltersFound: 0
+  existingCollidersReused: 0
+  meshCollidersAdded: 0
+  invalidMeshesSkipped: 0
 --- !u!135 &1346935832
 SphereCollider:
   m_ObjectHideFlags: 0
@@ -6033,15 +6040,29 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 85c754f27f9361d439b8ee0ddb919566, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SimpleRayTracer
-  rtSceneMask:
+  propagationGeometryMask:
     serializedVersion: 2
     m_Bits: 8
+  colliderBaker: {fileID: 1346935831}
   blockedRssiDb: -120
   referenceRssiDb: -40
   referenceDistance: 1
   pathLossExponent: 2
-  endpointHitTolerance: 0.08
+  minimumDistance: 0.1
+  endpointEpsilon: 0.02
+  oneBounceLossDb: 4
+  twoBounceLossDb: 9
+  diffractionLossDb: 12
+  enableOneBounceReflections: 1
+  enableTwoBounceReflections: 1
+  enableFirstOrderDiffraction: 1
+  maximumSurfaceCandidates: 20
+  maximumSpec1Paths: 4
+  maximumSpec2Paths: 2
+  maximumWedgeCandidates: 64
+  maximumDiffractionPaths: 2
   debugDraw: 0
+  logTraceDiagnostics: 0
 --- !u!114 &1346935837
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -6055,13 +6076,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RtFloorField
   tracer: {fileID: 1346935836}
-  useLiveMRUKRoom: 1
-  coordinateFrameRoot: {fileID: 0}
-  fallbackRoomAnchorName: RoomAnchor
+  colliderBaker: {fileID: 1346935831}
   txTransform: {fileID: 0}
   cellSize: 0.5
   ueHeight: 1.7
-  floorY: 0
+  floorY: 0.01
   xRange: {x: -3, y: 3}
   zRange: {x: -3, y: 3}
   tileMaterial: {fileID: 0}
@@ -6087,35 +6106,93 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d7849dc85489d5044a1965ac8437ca10, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PathPickerInteractor
+  controllerAimRay: {fileID: 1346935839}
+  colliderBaker: {fileID: 1346935831}
   floorField: {fileID: 1346935837}
-  rayOrigin: {fileID: 126266616}
-  useOVRControllerPose: 1
-  controller: 2
-  trackingSpace: {fileID: 0}
-  pickMask:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  maxPickDistance: 10
-  losLineMaterial: {fileID: 0}
-  pathVisualParent: {fileID: 0}
-  label: {fileID: 0}
-  useKeyboardFallback: 1
+  tracer: {fileID: 1346935836}
+  pathVisualizer: {fileID: 1346935840}
   useQuestTrigger: 1
   pickButton: 2097152
-  primaryLocalRayDirection: {x: 0, y: 0, z: 1}
-  tryAlternateControllerAxes: 1
-  pickedHitMarker: {fileID: 0}
-  drawTxToPickedHitPoint: 1
-  alsoDrawCachedCellPaths: 0
-  drawPointerLine: 1
-  pointerOnlyWhilePicking: 0
-  pointerLine: {fileID: 0}
-  pointerHitColor: {r: 0, g: 1, b: 0, a: 1}
-  pointerMissColor: {r: 1, g: 0, b: 0, a: 1}
-  pointerLineWidth: 0.01
+  useKeyboardFallback: 1
+  keyboardPickKey: 32
+  floorNormalThreshold: 0.65
+--- !u!114 &1346935839
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1346935829}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8a0e58333e1b4fa2af7ae0c91c5df77a, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::ControllerAimRay
+  controllerAimTransform: {fileID: 126266619}
+  controller: 2
+  aimAxis: 0
+  localOriginOffset: {x: 0, y: 0, z: 0}
+  assumeTrackingValidInEditor: 1
+  selectableTargetMask:
+    serializedVersion: 2
+    m_Bits: 8
+  nonSelectableTargetMask:
+    serializedVersion: 2
+    m_Bits: 0
+  maxDistance: 10
+  onlyVisibleInAnalyzeMode: 0
+  analyzeModeSource: {fileID: 1346935837}
+  lineRenderer: {fileID: 0}
+  lineMaterial: {fileID: 0}
+  rayWidth: 0.008
+  validHitColor: {r: 0, g: 1, b: 0, a: 1}
+  missColor: {r: 1, g: 0, b: 0, a: 1}
+  invalidTargetColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+  showHitMarker: 1
+  hitMarker: {fileID: 0}
+  hitMarkerScale: 0.035
+  showDebugAxes: 0
+  debugAxisLength: 0.2
+  colliderBaker: {fileID: 1346935831}
+  tracer: {fileID: 1346935836}
+--- !u!114 &1346935840
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1346935829}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d4e6a521684c42929caf79f36dfe7abc, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::RtPathVisualizer
+  pathMaterial: {fileID: 0}
+  visualParent: {fileID: 0}
+  label: {fileID: 0}
   pathLineWidth: 0.025
-  markerRadius: 0.06
-  pointerVisibleSecondsAfterPick: 0.35
+  markerDiameter: 0.08
+  losColor: {r: 0, g: 1, b: 0, a: 1}
+  spec1Color: {r: 0, g: 1, b: 1, a: 1}
+  spec2Color: {r: 0, g: 0, b: 1, a: 1}
+  diff1Color: {r: 1, g: 0, b: 1, a: 1}
+--- !u!114 &1346935841
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1346935829}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 63cf68793aaa4f069c0d5247731d9d72, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::WedgeEdgeExtractor
+  minimumDihedralDegrees: 25
+  includeBoundaryEdges: 1
+  minimumEdgeLength: 0.08
+  maximumWedges: 256
+  drawDebugWedges: 0
 --- !u!21 &1375769451
 Material:
   serializedVersion: 8
