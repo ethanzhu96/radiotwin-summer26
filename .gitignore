@@ -94,3 +94,6 @@ Thumbs.db
 Assets/_Recovery/
 Assets/_Recovery.meta
 Assets/_Recovery.me
+*.slnx
+/quest_room_mesh.obj
+/rf_dataset_metadata.json
