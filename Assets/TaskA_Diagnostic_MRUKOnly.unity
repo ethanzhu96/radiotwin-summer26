@@ -6126,7 +6126,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 8a0e58333e1b4fa2af7ae0c91c5df77a, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ControllerAimRay
   controllerAimTransform: {fileID: 126266619}
   controller: 2
@@ -6165,7 +6165,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: d4e6a521684c42929caf79f36dfe7abc, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RtPathVisualizer
   pathMaterial: {fileID: 0}
   visualParent: {fileID: 0}
@@ -6186,7 +6186,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 63cf68793aaa4f069c0d5247731d9d72, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::WedgeEdgeExtractor
   minimumDihedralDegrees: 25
   includeBoundaryEdges: 1
@@ -6312,6 +6312,8 @@ MonoBehaviour:
   preferMRUKRoomAnchor: 1
   requireMRUKRoomAnchorForLogging: 1
   fileName: rf_trajectory_log.csv
+  metadataFileName: rf_dataset_metadata.json
+  meshFileName: quest_room_mesh.obj
   sampleIntervalSeconds: 1
   isLogging: 0
   toggleLoggingKey: 115
@@ -6654,6 +6656,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MRUKMeshExporter
   fileName: quest_room_mesh.obj
+  metadataFileName: rf_dataset_metadata.json
+  trajectoryFileName: rf_trajectory_log.csv
   exportDelaySeconds: 5
   roomLoadTimeoutSeconds: 30
   exportKey: 109
@@ -6934,7 +6938,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
   m_LocalPosition: {x: 3.55343, y: -9.091331, z: -2.49297}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalScale: {x: 0.6, y: 0.6, z: 0.6}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1003292120}

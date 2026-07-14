@@ -27,6 +27,7 @@ public class VisualizationModeManagerEditor : Editor
         DrawModeButton(manager, VisualizationModeManager.VisualizationMode.M2_HeightBars, "M2 Height Bars");
         DrawModeButton(manager, VisualizationModeManager.VisualizationMode.M3_Collapsed2D, "M3 Collapsed 2D");
         DrawModeButton(manager, VisualizationModeManager.VisualizationMode.M4_VoxelCloud, "M4 Voxel Cloud");
+        DrawModeButton(manager, VisualizationModeManager.VisualizationMode.None, "No Visualization");
     }
 
     private static void DrawModeButton(

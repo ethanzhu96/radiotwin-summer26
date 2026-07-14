@@ -8,7 +8,8 @@ public class VisualizationModeManager : MonoBehaviour
         M1_FloorTiles = 1,
         M2_HeightBars = 2,
         M3_Collapsed2D = 3,
-        M4_VoxelCloud = 4
+        M4_VoxelCloud = 4,
+        None = 5
     }
 
     [Header("Mode Parents")]
@@ -43,7 +44,7 @@ public class VisualizationModeManager : MonoBehaviour
         if (Input.GetKeyDown(KeyCode.Alpha4)) ApplyMode(VisualizationMode.M4_VoxelCloud);
         if (Input.GetKeyDown(regenerateKey)) RegenerateCurrentMode();
 
-        // press B to cycle between M modes.
+        // Press B to cycle through M0-M4 and no visualization.
         if (OVRInput.GetDown(OVRInput.Button.Two))
         {
             CycleMode();
@@ -52,7 +53,7 @@ public class VisualizationModeManager : MonoBehaviour
 
     public void CycleMode()
     {
-        int next = ((int)currentMode + 1) % 5;
+        int next = ((int)currentMode + 1) % 6;
         ApplyMode((VisualizationMode)next);
     }
 
@@ -77,6 +78,13 @@ public class VisualizationModeManager : MonoBehaviour
     [ContextMenu("Regenerate Current Mode")]
     public void RegenerateCurrentMode()
     {
+        if (currentMode == VisualizationMode.None)
+        {
+            lastRegenerateStatus = "Visualization disabled.";
+            Debug.Log("VisualizationModeManager: " + lastRegenerateStatus);
+            return;
+        }
+
         bool regenerated = false;
 
         switch (currentMode)

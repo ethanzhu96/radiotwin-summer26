@@ -52,7 +52,7 @@ public class TxLineOfSightVisualizer : MonoBehaviour
     [Header("Visual Mapping")]
     public Color antennaColor = new Color(1f, 0.1f, 0.85f, 1f);
     public Color pulseColor = new Color(0.2f, 0.9f, 1f, 0.85f);
-    public float markerScale = 1f;
+    public float markerScale = 0.5f;
 
     [Header("Keyboard Debug")]
     public KeyCode placeKey = KeyCode.T;
