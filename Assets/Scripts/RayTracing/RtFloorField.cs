@@ -39,11 +39,12 @@ public class RtFloorField : MonoBehaviour
 
     [Header("Analyze Mode")]
     public bool enableRightThumbstickToggle = true;
-    public OVRInput.Button toggleButton = OVRInput.Button.SecondaryThumbstick;
     public bool startVisible;
 
     private readonly Dictionary<Vector2Int, RtCell> cells = new Dictionary<Vector2Int, RtCell>();
+    private readonly Dictionary<Vector2Int, RtCell> candidateCells = new Dictionary<Vector2Int, RtCell>();
     private bool isVisible;
+    private bool showingCandidateDataset;
     private Transform coordinateFrameRoot;
 
     public Transform CurrentTxTransform => txTransform;
@@ -51,6 +52,10 @@ public class RtFloorField : MonoBehaviour
     public bool HasCells => cells.Count > 0;
     public bool IsComputed { get; private set; }
     public bool IsAnalyzeModeActive => isVisible;
+    public float WeakRssiDb => tracer != null ? tracer.BlockedRssiDb : -120f;
+    public float StrongRssiDb => tracer != null ? tracer.ReferenceRssiDb : -40f;
+    public bool IsReadyForCandidateEvaluation => tracer != null && ResolveCoordinateFrameRoot() &&
+        colliderBaker != null && colliderBaker.IsReady;
 
     private void Start()
     {
@@ -163,7 +168,68 @@ public class RtFloorField : MonoBehaviour
 
     public bool TryGetCell(Vector2Int index, out RtCell cell)
     {
-        return cells.TryGetValue(index, out cell);
+        return (showingCandidateDataset ? candidateCells : cells).TryGetValue(index, out cell);
+    }
+
+    public List<Vector2Int> GetEvaluationGridIndices()
+    {
+        List<Vector2Int> indices = new List<Vector2Int>();
+        float safeCellSize = Mathf.Max(cellSize, 0.001f);
+        int minGx = Mathf.FloorToInt(xRange.x / safeCellSize);
+        int maxGx = Mathf.FloorToInt(xRange.y / safeCellSize);
+        int minGz = Mathf.FloorToInt(zRange.x / safeCellSize);
+        int maxGz = Mathf.FloorToInt(zRange.y / safeCellSize);
+        for (int gx = minGx; gx <= maxGx; gx++)
+        for (int gz = minGz; gz <= maxGz; gz++)
+        {
+            Vector2Int index = new Vector2Int(gx, gz);
+            Vector3 floorLocal = GridIndexToFloorLocal(index, safeCellSize);
+            if (floorLocal.x >= xRange.x && floorLocal.x <= xRange.y &&
+                floorLocal.z >= zRange.x && floorLocal.z <= zRange.y) indices.Add(index);
+        }
+        return indices;
+    }
+
+    public RtCell EvaluateCell(Vector3 txWorld, Vector2Int index)
+    {
+        if (!ResolveCoordinateFrameRoot() || tracer == null) return null;
+        Vector3 floorLocal = GridIndexToFloorLocal(index);
+        Vector3 rxLocal = new Vector3(floorLocal.x, floorY + ueHeight, floorLocal.z);
+        Vector3 rxWorld = coordinateFrameRoot.TransformPoint(rxLocal);
+        List<RtPath> paths = tracer.Trace(txWorld, rxWorld, out float rssi);
+        return new RtCell { index = index, rxLocal = rxLocal, rxWorld = rxWorld,
+            predictedRssiDb = rssi, paths = paths };
+    }
+
+    public void ShowCandidateDataset(IReadOnlyList<RtCell> dataset)
+    {
+        ClearCandidateDataset();
+        if (dataset == null) return;
+        showingCandidateDataset = true;
+        isVisible = true;
+        foreach (KeyValuePair<Vector2Int, RtCell> entry in cells)
+            if (entry.Value.tileObject != null) entry.Value.tileObject.SetActive(false);
+        for (int i = 0; i < dataset.Count; i++)
+        {
+            RtCell source = dataset[i];
+            if (source == null) continue;
+            RtCell cell = new RtCell { index = source.index, rxLocal = source.rxLocal,
+                rxWorld = source.rxWorld, predictedRssiDb = source.predictedRssiDb, paths = source.paths };
+            Vector3 floorLocal = GridIndexToFloorLocal(cell.index);
+            cell.tileObject = CreateTile(cell.index, floorLocal, cell.predictedRssiDb);
+            candidateCells[cell.index] = cell;
+        }
+        SetTilesVisible(isVisible);
+        Debug.Log("[APHeatmap] Showing candidate dataset with " + candidateCells.Count + " cells.");
+    }
+
+    public void ClearCandidateDataset()
+    {
+        foreach (KeyValuePair<Vector2Int, RtCell> entry in candidateCells)
+            if (entry.Value.tileObject != null) Destroy(entry.Value.tileObject);
+        candidateCells.Clear();
+        showingCandidateDataset = false;
+        SetTilesVisible(isVisible);
     }
 
     public bool TryGetTxTransform(out Transform tx)
@@ -311,9 +377,11 @@ public class RtFloorField : MonoBehaviour
         {
             if (entry.Value.tileObject != null)
             {
-                entry.Value.tileObject.SetActive(visible);
+                entry.Value.tileObject.SetActive(visible && !showingCandidateDataset);
             }
         }
+        foreach (KeyValuePair<Vector2Int, RtCell> entry in candidateCells)
+            if (entry.Value.tileObject != null) entry.Value.tileObject.SetActive(visible && showingCandidateDataset);
     }
 
     private Color RssiToColor(float rssi)

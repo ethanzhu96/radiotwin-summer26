@@ -97,7 +97,7 @@ public class TxLineOfSightVisualizer : MonoBehaviour
 
     void Update()
     {
-        bool questPlacePressed = OVRInput.GetDown(placeButton);
+        bool questPlacePressed = OVRInput.GetDown(placeButton, OVRInput.Controller.RTouch);
         bool questLoadPressed = OVRInput.GetDown(loadButton);
 
         if ((Input.GetKeyDown(placeKey) || questPlacePressed) && !isBusy)

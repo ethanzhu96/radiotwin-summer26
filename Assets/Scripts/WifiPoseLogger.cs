@@ -24,7 +24,6 @@ public class WifiPoseLogger : MonoBehaviour
     [Header("Logging Controls")]
     public bool isLogging = false;
     public KeyCode toggleLoggingKey = KeyCode.S;
-    public OVRInput.Button toggleLoggingButton = OVRInput.Button.Three;
     public bool overwriteFileWhenLoggingStarts = true;
 
     [Header("Status Display")]
@@ -89,8 +88,10 @@ public class WifiPoseLogger : MonoBehaviour
     {
         UpdateStatusDisplay();
 
-        if (Input.GetKeyDown(toggleLoggingKey) || OVRInput.GetDown(toggleLoggingButton))
+        if (Input.GetKeyDown(toggleLoggingKey) ||
+            OVRInput.GetDown(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.LTouch))
         {
+            Debug.Log("[ControllerInput] Left trigger down: toggle logging");
             ToggleLogging();
         }
 

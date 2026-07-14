@@ -12,7 +12,6 @@ public class PathPickerInteractor : MonoBehaviour
 
     [Header("Selection Input")]
     [SerializeField] private bool useQuestTrigger = true;
-    [SerializeField] private OVRInput.Button pickButton = OVRInput.Button.SecondaryIndexTrigger;
     [SerializeField] private bool useKeyboardFallback = true;
     [SerializeField] private KeyCode keyboardPickKey = KeyCode.Space;
 
