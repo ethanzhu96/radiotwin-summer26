@@ -64,7 +64,8 @@ public class RtFloorField : MonoBehaviour
 
     private void Update()
     {
-        if (enableRightThumbstickToggle && OVRInput.GetDown(toggleButton))
+        if (enableRightThumbstickToggle &&
+            OVRInput.GetDown(OVRInput.Button.PrimaryThumbstick, OVRInput.Controller.RTouch))
         {
             ToggleField();
         }

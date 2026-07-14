@@ -27,7 +27,9 @@ public class PathPickerInteractor : MonoBehaviour
     private void Update()
     {
         bool selectPressed = (useKeyboardFallback && Input.GetKeyDown(keyboardPickKey)) ||
-            (useQuestTrigger && OVRInput.GetDown(pickButton));
+            (useQuestTrigger && OVRInput.GetDown(
+                OVRInput.Button.PrimaryIndexTrigger,
+                OVRInput.Controller.RTouch));
         if (selectPressed)
         {
             Pick();
