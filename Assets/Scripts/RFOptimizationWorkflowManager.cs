@@ -21,6 +21,7 @@ public class RFOptimizationWorkflowManager : MonoBehaviour
 
     private APPlacementManager routerPlacement;
     private ReflectorOptimizationController reflector;
+    private RadioLensPropagationController propagation;
     private Transform centerEye;
     private Transform rightController;
     private Canvas canvas;
@@ -101,6 +102,8 @@ public class RFOptimizationWorkflowManager : MonoBehaviour
         }
         if (reflector != null && rig != null)
             reflector.Initialize(rig.leftControllerInHandAnchor);
+        if (propagation == null) propagation = FindFirstObjectByType<RadioLensPropagationController>();
+        if (propagation == null) propagation = gameObject.AddComponent<RadioLensPropagationController>();
         if (menuRaycaster != null && rightController != null && menuRaycaster.pointer != rightController.gameObject)
             menuRaycaster.pointer = rightController.gameObject;
     }
@@ -115,7 +118,7 @@ public class RFOptimizationWorkflowManager : MonoBehaviour
     public void HandleEvaluatePressed()
     {
         if (CurrentBackend == PropagationBackend.Sionna)
-            Status("Sionna optimization is not implemented yet; recommendation evaluation is using Simple mode.");
+            propagation?.ReportSimpleRecommendationFallback();
         Debug.Log("[RFWorkflow] Evaluation routed to " + CurrentMode + ".");
         if (CurrentMode == RFOptimizationMode.Router) routerPlacement?.RequestEvaluation();
         else reflector?.RequestAnalysis();
@@ -144,15 +147,22 @@ public class RFOptimizationWorkflowManager : MonoBehaviour
     public void SelectSimpleBackend()
     {
         CurrentBackend = PropagationBackend.Simple;
-        Status("Simple propagation model selected.");
+        ResolveReferences();
+        propagation?.SelectBackend(CurrentBackend);
         RefreshUi();
     }
 
     public void SelectSionnaBackend()
     {
         CurrentBackend = PropagationBackend.Sionna;
-        Status("Sionna RT selected. Server tracing will be connected in the Sionna integration step.");
+        ResolveReferences();
+        propagation?.SelectBackend(CurrentBackend);
         RefreshUi();
+    }
+
+    public void SetPropagationStatus(string message)
+    {
+        if (backendStatusText != null) backendStatusText.text = message;
     }
 
     private bool AnyEvaluationRunning() => (routerPlacement != null && routerPlacement.IsEvaluating) ||
@@ -274,9 +284,8 @@ public class RFOptimizationWorkflowManager : MonoBehaviour
         SetButtonSelected(reflectorModeButton, CurrentMode == RFOptimizationMode.Reflector);
         SetButtonSelected(simpleBackendButton, CurrentBackend == PropagationBackend.Simple);
         SetButtonSelected(sionnaBackendButton, CurrentBackend == PropagationBackend.Sionna);
-        if (backendStatusText != null) backendStatusText.text = CurrentBackend == PropagationBackend.Simple
-            ? "Local lightweight ray tracing"
-            : "Sionna RT prototype; guidance still uses Simple";
+        if (backendStatusText != null && propagation != null)
+            backendStatusText.text = propagation.CurrentStatus;
         modeText.text = CurrentMode == RFOptimizationMode.Router ? "Optimal Router Placement" : "Optimal Reflector Placement";
         if (CurrentMode == RFOptimizationMode.Router)
         {
@@ -286,14 +295,18 @@ public class RFOptimizationWorkflowManager : MonoBehaviour
             summaryText.text = winner == null ? "Router candidates: " + count + " / 8" :
                 "Recommended: " + winner.candidateId + "   Score " + winner.overallScore.ToString("F1") +
                 "   Coverage " + winner.coveragePercent.ToString("F0") + "%";
-            instructionText.text = "X Place   •   Grip nearby Remove   •   Left stick Evaluate   •   Right stick Heatmap";
+            instructionText.text = CurrentBackend == PropagationBackend.Sionna
+                ? "X Place Router   •   Right trigger Select Rx   •   Right grip Trace/Clear   •   Left stick Recommend"
+                : "X Place   •   Grip nearby Remove   •   Left stick Evaluate   •   Right stick Heatmap";
         }
         else
         {
             phaseText.text = "Phase: " + (reflector != null ? reflector.PhaseName : "Waiting");
             summaryText.text = reflector == null || !reflector.HasAssumedTx ? "Assumed Tx: Not placed" :
                 "Assumed Tx: Ready   •   Reflectors recommended: " + reflector.RecommendationCount;
-            instructionText.text = "X Place Assumed Tx   •   Grip nearby Remove   •   Left stick Analyze   •   Right stick Heatmap";
+            instructionText.text = CurrentBackend == PropagationBackend.Sionna
+                ? "X Place Tx   •   Right trigger Select Rx   •   Right grip Trace/Clear   •   Left stick Recommend"
+                : "X Place Assumed Tx   •   Grip nearby Remove   •   Left stick Analyze   •   Right stick Heatmap";
         }
     }
 

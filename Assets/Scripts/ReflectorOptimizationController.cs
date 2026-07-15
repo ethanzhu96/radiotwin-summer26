@@ -82,6 +82,12 @@ public class ReflectorOptimizationController : MonoBehaviour
     public string PhaseName => phase.ToString();
     public IReadOnlyList<RecommendedReflectorData> Recommendations => recommendations;
 
+    public bool TryGetAssumedTxTransform(out Transform tx)
+    {
+        tx = assumedTx;
+        return tx != null;
+    }
+
     public void Initialize(Transform controller)
     {
         if (controller != null) leftController = controller;

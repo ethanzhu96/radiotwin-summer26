@@ -63,6 +63,13 @@ public class PathPickerInteractor : MonoBehaviour
             pathVisualizer.Clear();
         }
 
+        RadioLensPropagationController propagation = RadioLensPropagationController.Instance;
+        if (propagation != null && propagation.CurrentBackend == PropagationBackend.Sionna)
+        {
+            propagation.SelectReceiverFromCurrentRay(controllerAimRay);
+            return;
+        }
+
         RoomAlignmentManager alignment = RoomAlignmentManager.Instance;
         if (alignment == null || alignment.State != RoomAlignmentManager.PlaybackState.Ready ||
             alignment.DatasetRoot == null)

@@ -95,6 +95,17 @@ public class APPlacementManager : MonoBehaviour
         return null;
     }
 
+    public bool TryGetTraceTxTransform(out Transform tx)
+    {
+        tx = null;
+        for (int i = 0; i < markers.Count; i++)
+            if (markers[i] != null && markers[i].Data != null && markers[i].Data.rank == 1)
+            { tx = markers[i].transform; return true; }
+        for (int i = markers.Count - 1; i >= 0; i--)
+            if (markers[i] != null) { tx = markers[i].transform; return true; }
+        return false;
+    }
+
     private void FixedUpdate()
     {
         if (proximityProxy != null && leftController != null)

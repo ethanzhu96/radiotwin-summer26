@@ -4029,6 +4029,107 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 400004, guid: 126d619cf4daa52469682f85c1378b4a, type: 3}
   m_PrefabInstance: {fileID: 126266614}
   m_PrefabAsset: {fileID: 0}
+--- !u!1 &910000000
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 910000001}
+  - component: {fileID: 910000002}
+  - component: {fileID: 910000003}
+  - component: {fileID: 910000004}
+  - component: {fileID: 910000005}
+  m_Layer: 0
+  m_Name: RadioLensPropagationSystem
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &910000001
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 910000000}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &910000002
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 910000000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 77e0e5b682104d8fbf694fac5daa1864, type: 3}
+  m_Name: RadioLensPropagationController
+  m_EditorClassIdentifier: Assembly-CSharp::RadioLensPropagationController
+  roomContext: {fileID: 910000003}
+  sionnaClient: {fileID: 910000004}
+  sionnaRenderer: {fileID: 910000005}
+  floorField: {fileID: 0}
+  routerPlacement: {fileID: 0}
+  reflectorOptimization: {fileID: 0}
+  simplePathVisualizer: {fileID: 0}
+  receiverMarkerDiameter: 0.08
+  receiverMarkerColor: {r: 1, g: 0.45, b: 0.05, a: 1}
+--- !u!114 &910000003
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 910000000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e89e618280ee4ee9bfdf8e4215e2b3fc, type: 3}
+  m_Name: RadioLensRoomContext
+  m_EditorClassIdentifier: Assembly-CSharp::RadioLensRoomContext
+--- !u!114 &910000004
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 910000000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0cd89f5acdbc44db925ab945f062e9f5, type: 3}
+  m_Name: RadioLensSionnaClient
+  m_EditorClassIdentifier: Assembly-CSharp::RadioLensSionnaClient
+  serverBaseUrl: http://127.0.0.1:8000
+  requestTimeoutSeconds: 60
+  frequencyHz: 5580000000
+  maxDepth: 2
+  topK: 5
+--- !u!114 &910000005
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 910000000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c0c748ea5b2a4973b8d1fc4d50db9970, type: 3}
+  m_Name: RadioLensSionnaPathRenderer
+  m_EditorClassIdentifier: Assembly-CSharp::RadioLensSionnaPathRenderer
+  lineMaterial: {fileID: 0}
+  lineWidth: 0.018
+  strongestPathColor: {r: 0.15, g: 1, b: 0.45, a: 1}
+  otherPathColor: {r: 0.1, g: 0.65, b: 1, a: 1}
 --- !u!1 &929785154
 GameObject:
   m_ObjectHideFlags: 0
@@ -6053,6 +6154,7 @@ MonoBehaviour:
   oneBounceLossDb: 4
   twoBounceLossDb: 9
   diffractionLossDb: 12
+  engineeredReflectorLossDb: 2
   enableOneBounceReflections: 1
   enableTwoBounceReflections: 1
   enableFirstOrderDiffraction: 1
@@ -6092,7 +6194,6 @@ MonoBehaviour:
   - TX_SPATIAL_ANCHOR_
   - TX_MARKER_
   enableRightThumbstickToggle: 1
-  toggleButton: 8388608
   startVisible: 0
 --- !u!114 &1346935838
 MonoBehaviour:
@@ -6112,7 +6213,6 @@ MonoBehaviour:
   tracer: {fileID: 1346935836}
   pathVisualizer: {fileID: 1346935840}
   useQuestTrigger: 1
-  pickButton: 2097152
   useKeyboardFallback: 1
   keyboardPickKey: 32
   floorNormalThreshold: 0.65
@@ -6317,7 +6417,6 @@ MonoBehaviour:
   sampleIntervalSeconds: 1
   isLogging: 0
   toggleLoggingKey: 115
-  toggleLoggingButton: 4
   overwriteFileWhenLoggingStarts: 1
   showStatusDisplay: 1
   statusDisplayLocalPosition: {x: 0.62, y: 0.36, z: 1.25}
@@ -8603,3 +8702,4 @@ SceneRoots:
   - {fileID: 1003292120}
   - {fileID: 1995644374}
   - {fileID: 1346935834}
+  - {fileID: 910000001}

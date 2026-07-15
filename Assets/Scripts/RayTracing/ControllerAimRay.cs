@@ -89,8 +89,12 @@ public class ControllerAimRay : MonoBehaviour
             ResolveAimTransform();
         }
 
-        bool analyzeActive = !onlyVisibleInAnalyzeMode ||
-            (analyzeModeSource != null && analyzeModeSource.IsAnalyzeModeActive);
+        bool menuOpen = RFOptimizationWorkflowManager.Instance != null &&
+            RFOptimizationWorkflowManager.Instance.IsMenuOpen;
+        bool sionnaActive = RadioLensPropagationController.Instance != null &&
+            RadioLensPropagationController.Instance.CurrentBackend == PropagationBackend.Sionna;
+        bool analyzeActive = !menuOpen && (sionnaActive || !onlyVisibleInAnalyzeMode ||
+            (analyzeModeSource != null && analyzeModeSource.IsAnalyzeModeActive));
         IsTrackingValid = IsControllerTrackingValid();
         ReportTrackingTransition(IsTrackingValid);
 
