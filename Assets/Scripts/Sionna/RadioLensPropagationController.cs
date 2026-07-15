@@ -19,6 +19,7 @@ public class RadioLensPropagationController : MonoBehaviour
     [SerializeField] private APPlacementManager routerPlacement;
     [SerializeField] private ReflectorOptimizationController reflectorOptimization;
     [SerializeField] private RtPathVisualizer simplePathVisualizer;
+    [SerializeField] private RadioLensSionnaRouterEvaluator routerEvaluator;
 
     [Header("Receiver Marker")]
     [SerializeField, Min(.01f)] private float receiverMarkerDiameter = .08f;
@@ -76,6 +77,7 @@ public class RadioLensPropagationController : MonoBehaviour
         if (routerPlacement == null) routerPlacement = FindFirstObjectByType<APPlacementManager>();
         if (reflectorOptimization == null) reflectorOptimization = FindFirstObjectByType<ReflectorOptimizationController>();
         if (simplePathVisualizer == null) simplePathVisualizer = FindFirstObjectByType<RtPathVisualizer>();
+        if (routerEvaluator == null) routerEvaluator = FindFirstObjectByType<RadioLensSionnaRouterEvaluator>();
     }
 
     public void SelectBackend(PropagationBackend backend)
@@ -83,6 +85,7 @@ public class RadioLensPropagationController : MonoBehaviour
         if (CurrentBackend != backend)
         {
             InvalidateRequests();
+            routerEvaluator?.CancelEvaluation();
             if (simplePathVisualizer != null) simplePathVisualizer.Clear();
             if (sionnaRenderer != null) sionnaRenderer.ClearPaths();
             HasSelectedReceiver = false;
@@ -106,6 +109,8 @@ public class RadioLensPropagationController : MonoBehaviour
     public bool SelectReceiverFromCurrentRay(ControllerAimRay aimRay)
     {
         if (CurrentBackend != PropagationBackend.Sionna) return false;
+        if (routerEvaluator != null && routerEvaluator.IsEvaluating)
+        { SetStatus("Wait for Sionna router ranking to finish."); return true; }
         if (aimRay == null || !aimRay.IsTrackingValid || !aimRay.HasSelectableHit)
         { SetStatus("Aim at a valid room surface."); return true; }
         SelectReceiver(aimRay.CurrentHit.point);
@@ -126,6 +131,8 @@ public class RadioLensPropagationController : MonoBehaviour
     {
         ResolveDependencies();
         if (CurrentBackend != PropagationBackend.Sionna) return;
+        if (routerEvaluator != null && routerEvaluator.IsEvaluating)
+        { SetStatus("Wait for Sionna router ranking to finish."); return; }
         if (IsRequestRunning) { SetStatus("Sionna request already running."); return; }
         if (roomContext == null || !roomContext.IsReady)
         { SetStatus("Preparing room mesh..."); roomContext?.RefreshContext(); return; }
@@ -231,6 +238,7 @@ public class RadioLensPropagationController : MonoBehaviour
     private void OnRoomContextChanged()
     {
         InvalidateRequests();
+        routerEvaluator?.CancelEvaluation();
         if (sionnaRenderer != null) sionnaRenderer.ClearPaths();
         HasSelectedReceiver = false;
         if (receiverMarker != null) receiverMarker.SetActive(false);
@@ -253,8 +261,8 @@ public class RadioLensPropagationController : MonoBehaviour
         return "Sionna unavailable.";
     }
 
-    private void OnApplicationPause(bool paused) { if (paused) InvalidateRequests(); }
-    private void OnApplicationQuit() { InvalidateRequests(); }
+    private void OnApplicationPause(bool paused) { if (paused) { InvalidateRequests(); routerEvaluator?.CancelEvaluation(); } }
+    private void OnApplicationQuit() { InvalidateRequests(); routerEvaluator?.CancelEvaluation(); }
 
     private void OnDestroy()
     {

@@ -4042,6 +4042,7 @@ GameObject:
   - component: {fileID: 910000003}
   - component: {fileID: 910000004}
   - component: {fileID: 910000005}
+  - component: {fileID: 910000006}
   m_Layer: 0
   m_Name: RadioLensPropagationSystem
   m_TagString: Untagged
@@ -4083,6 +4084,7 @@ MonoBehaviour:
   routerPlacement: {fileID: 0}
   reflectorOptimization: {fileID: 0}
   simplePathVisualizer: {fileID: 0}
+  routerEvaluator: {fileID: 910000006}
   receiverMarkerDiameter: 0.08
   receiverMarkerColor: {r: 1, g: 0.45, b: 0.05, a: 1}
 --- !u!114 &910000003
@@ -4130,6 +4132,30 @@ MonoBehaviour:
   lineWidth: 0.018
   strongestPathColor: {r: 0.15, g: 1, b: 0.45, a: 1}
   otherPathColor: {r: 0.1, g: 0.65, b: 1, a: 1}
+--- !u!114 &910000006
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 910000000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 966ad93c6e9d47e79bd845812a848ca3, type: 3}
+  m_Name: RadioLensSionnaRouterEvaluator
+  m_EditorClassIdentifier: Assembly-CSharp::RadioLensSionnaRouterEvaluator
+  maximumReceiverSamples: 5
+  coverageThresholdPathGainDb: -90
+  weakPathGainDb: -140
+  strongPathGainDb: -40
+  coverageWeight: 0.5
+  tenthPercentileWeight: 0.3
+  uniformityWeight: 0.2
+  roomContext: {fileID: 910000003}
+  sionnaClient: {fileID: 910000004}
+  pathRenderer: {fileID: 910000005}
+  propagation: {fileID: 910000002}
+  floorField: {fileID: 0}
 --- !u!1 &929785154
 GameObject:
   m_ObjectHideFlags: 0

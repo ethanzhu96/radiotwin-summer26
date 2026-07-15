@@ -13,6 +13,7 @@ public class APOptimizationManager : MonoBehaviour
     [SerializeField, Min(1)] private int cellsPerFrame = 4;
 
     private APPlacementManager placement;
+    private RadioLensSionnaRouterEvaluator sionnaEvaluator;
     private bool isEvaluating;
     private int evaluationGeneration;
 
@@ -22,11 +23,20 @@ public class APOptimizationManager : MonoBehaviour
     {
         if (placement == null) placement = GetComponent<APPlacementManager>();
         if (floorField == null) floorField = FindFirstObjectByType<RtFloorField>();
+        if (sionnaEvaluator == null) sionnaEvaluator = FindFirstObjectByType<RadioLensSionnaRouterEvaluator>();
     }
 
     public void RequestCandidateEvaluation()
     {
         Debug.Log("[APOptimization] Evaluation requested.");
+        RadioLensPropagationController propagation = RadioLensPropagationController.Instance;
+        if (propagation != null && propagation.CurrentBackend == PropagationBackend.Sionna)
+        {
+            if (sionnaEvaluator == null) sionnaEvaluator = FindFirstObjectByType<RadioLensSionnaRouterEvaluator>();
+            if (sionnaEvaluator == null) sionnaEvaluator = propagation.gameObject.AddComponent<RadioLensSionnaRouterEvaluator>();
+            sionnaEvaluator.RequestEvaluation(placement);
+            return;
+        }
         if (isEvaluating || placement == null || placement.State == APPlacementState.Evaluating)
         { Reject("Candidate evaluation is already running."); return; }
         if (placement.State != APPlacementState.EditingCandidates)
@@ -152,6 +162,7 @@ public class APOptimizationManager : MonoBehaviour
     {
         evaluationGeneration++;
         isEvaluating = false;
+        sionnaEvaluator?.CancelEvaluation();
         if (floorField != null) floorField.ClearCandidateDataset();
     }
 
