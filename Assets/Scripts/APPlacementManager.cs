@@ -38,6 +38,9 @@ public class APPlacementManager : MonoBehaviour
     public Transform MatchedRoomTransform => RoomAlignmentManager.Instance != null ? RoomAlignmentManager.Instance.DatasetRoot : null;
     public bool IsLogging => logger != null && logger.isLogging;
     public Collider ProximityCollider => proximityProxy != null ? proximityProxy.GetComponent<Collider>() : null;
+    public bool InputEnabled { get; set; } = true;
+    public bool IsEvaluating => State == APPlacementState.Evaluating;
+    public int CandidateCount => candidates.Count;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void Bootstrap()
@@ -58,16 +61,38 @@ public class APPlacementManager : MonoBehaviour
     {
         ResolveControllerAndHierarchy();
 
-        if (OVRInput.GetDown(OVRInput.Button.One, OVRInput.Controller.LTouch))
+        if (InputEnabled && OVRInput.GetDown(OVRInput.Button.One, OVRInput.Controller.LTouch))
         {
             Debug.Log("[ControllerInput] X down: place candidate");
             HandlePlaceCandidatePressed();
         }
-        if (OVRInput.GetDown(OVRInput.Button.PrimaryThumbstick, OVRInput.Controller.LTouch))
+        if (InputEnabled && OVRInput.GetDown(OVRInput.Button.PrimaryThumbstick, OVRInput.Controller.LTouch))
         {
             Debug.Log("[ControllerInput] Left thumbstick down: evaluate candidates");
             optimizer.RequestCandidateEvaluation();
         }
+    }
+
+    public void RequestEvaluation() => optimizer.RequestCandidateEvaluation();
+
+    public void SetVisualsVisible(bool visible)
+    {
+        if (candidateContainer != null) candidateContainer.gameObject.SetActive(visible);
+    }
+
+    public void RestoreActiveHeatmap()
+    {
+        RtFloorField field = FindFirstObjectByType<RtFloorField>();
+        if (field == null) return;
+        for (int i = 0; i < candidates.Count; i++)
+            if (candidates[i].rank == 1 && candidates[i].heatmapCells != null)
+            { field.ShowCandidateDataset(candidates[i].heatmapCells); return; }
+    }
+
+    public APCandidateData GetRecommendedCandidate()
+    {
+        for (int i = 0; i < candidates.Count; i++) if (candidates[i].rank == 1) return candidates[i];
+        return null;
     }
 
     private void FixedUpdate()

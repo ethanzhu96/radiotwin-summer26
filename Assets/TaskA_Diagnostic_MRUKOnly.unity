@@ -6320,8 +6320,8 @@ MonoBehaviour:
   toggleLoggingButton: 4
   overwriteFileWhenLoggingStarts: 1
   showStatusDisplay: 1
-  statusDisplayLocalPosition: {x: 0.45, y: 0.26, z: 1.25}
-  statusTextSize: 0.018
+  statusDisplayLocalPosition: {x: 0.62, y: 0.36, z: 1.25}
+  statusTextSize: 0.012
   statusMessageSeconds: 1.5
 --- !u!4 &1399133874
 Transform:

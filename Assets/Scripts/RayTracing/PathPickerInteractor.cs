@@ -25,6 +25,10 @@ public class PathPickerInteractor : MonoBehaviour
 
     private void Update()
     {
+        if (RFOptimizationWorkflowManager.Instance != null && RFOptimizationWorkflowManager.Instance.IsMenuOpen)
+        {
+            return;
+        }
         bool selectPressed = (useKeyboardFallback && Input.GetKeyDown(keyboardPickKey)) ||
             (useQuestTrigger && OVRInput.GetDown(
                 OVRInput.Button.PrimaryIndexTrigger,

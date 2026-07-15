@@ -19,6 +19,7 @@ public struct RtPath
 
 public class SimpleRayTracer : MonoBehaviour
 {
+    private readonly List<RtSurfaceTriangle> engineeredReflectors = new List<RtSurfaceTriangle>();
     [FormerlySerializedAs("rtSceneMask")]
     [SerializeField] private LayerMask propagationGeometryMask;
     [SerializeField] private SceneColliderBaker colliderBaker;
@@ -33,6 +34,7 @@ public class SimpleRayTracer : MonoBehaviour
     [SerializeField] private float oneBounceLossDb = 4f;
     [SerializeField] private float twoBounceLossDb = 9f;
     [SerializeField] private float diffractionLossDb = 12f;
+    [SerializeField] private float engineeredReflectorLossDb = 2f;
 
     [Header("Bounded Multipath")]
     [SerializeField] private bool enableOneBounceReflections = true;
@@ -51,6 +53,14 @@ public class SimpleRayTracer : MonoBehaviour
     public LayerMask PropagationGeometryMask => propagationGeometryMask;
     public float BlockedRssiDb => blockedRssiDb;
     public float ReferenceRssiDb => referenceRssiDb;
+
+    public void SetEngineeredReflectors(IReadOnlyList<RtSurfaceTriangle> triangles)
+    {
+        engineeredReflectors.Clear();
+        if (triangles != null) for (int i = 0; i < triangles.Count; i++) engineeredReflectors.Add(triangles[i]);
+    }
+
+    public void ClearEngineeredReflectors() => engineeredReflectors.Clear();
 
     private void Awake()
     {
@@ -132,6 +142,7 @@ public class SimpleRayTracer : MonoBehaviour
     private List<RtSurfaceTriangle> GetSurfaceCandidates(Vector3 txWorld, Vector3 rxWorld)
     {
         List<RtSurfaceTriangle> candidates = new List<RtSurfaceTriangle>();
+        for (int i = 0; i < engineeredReflectors.Count; i++) candidates.Add(engineeredReflectors[i]);
         IReadOnlyList<RtSurfaceTriangle> all = colliderBaker.SurfaceTriangles;
         Vector3 midpoint = (txWorld + rxWorld) * 0.5f;
         List<(float score, RtSurfaceTriangle triangle)> scored =
@@ -145,7 +156,7 @@ public class SimpleRayTracer : MonoBehaviour
             scored.Add((score, triangle));
         }
         scored.Sort((left, right) => left.score.CompareTo(right.score));
-        int count = Mathf.Min(maximumSurfaceCandidates, scored.Count);
+        int count = Mathf.Min(Mathf.Max(0, maximumSurfaceCandidates - candidates.Count), scored.Count);
         for (int i = 0; i < count; i++)
         {
             candidates.Add(scored[i].triangle);
@@ -175,7 +186,7 @@ public class SimpleRayTracer : MonoBehaviour
             paths.Add(CreatePath(
                 RtPath.Kind.Spec1,
                 new[] { txWorld, bounceWorld, rxWorld },
-                oneBounceLossDb));
+                surfaces[i].isEngineeredReflector ? engineeredReflectorLossDb : oneBounceLossDb));
             added++;
         }
     }

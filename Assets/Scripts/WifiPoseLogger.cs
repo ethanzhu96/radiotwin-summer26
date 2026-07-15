@@ -28,8 +28,8 @@ public class WifiPoseLogger : MonoBehaviour
 
     [Header("Status Display")]
     public bool showStatusDisplay = true;
-    public Vector3 statusDisplayLocalPosition = new Vector3(0.45f, 0.26f, 1.25f);
-    public float statusTextSize = 0.018f;
+    public Vector3 statusDisplayLocalPosition = new Vector3(0.62f, 0.36f, 1.25f);
+    public float statusTextSize = 0.012f;
     public float statusMessageSeconds = 1.5f;
 
     private string filePath;

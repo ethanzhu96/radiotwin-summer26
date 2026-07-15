@@ -11,6 +11,7 @@ public struct RtSurfaceTriangle
     public Vector3 pointCWorld;
     public Vector3 normalWorld;
     public float area;
+    public bool isEngineeredReflector;
 }
 
 public class SceneColliderBaker : MonoBehaviour
