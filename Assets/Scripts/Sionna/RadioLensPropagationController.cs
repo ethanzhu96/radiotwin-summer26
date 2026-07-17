@@ -253,8 +253,6 @@ public class RadioLensPropagationController : MonoBehaviour
         RFOptimizationWorkflowManager.Instance?.SetPropagationStatus(message);
     }
 
-    public void ReportSimpleRecommendationFallback() => SetStatus("Recommendation generated using Simple mode.");
-
     private static string FriendlyNetworkError(string error)
     {
         if (!string.IsNullOrEmpty(error) && error.ToLowerInvariant().Contains("timeout")) return "Sionna request timed out.";

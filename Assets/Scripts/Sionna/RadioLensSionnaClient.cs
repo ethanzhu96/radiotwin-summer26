@@ -88,8 +88,64 @@ public class RadioLensSionnaClient : MonoBehaviour
         }
     }
 
+    public IEnumerator EnsureScene(RadioLensRoomContext context, byte[] objBytes, string meshVersion,
+        Action<bool, string> completed)
+    {
+        if (context == null || !context.IsReady || objBytes == null || objBytes.Length == 0 ||
+            string.IsNullOrEmpty(meshVersion))
+        { completed(false, "Candidate scene is not ready."); yield break; }
+        string query = "?coordinate_frame=" + UnityWebRequest.EscapeURL(SionnaProtocol.CoordinateFrame) +
+            "&mesh_version=" + UnityWebRequest.EscapeURL(meshVersion);
+        if (!TryBuildUrl("/v1/rooms/" + UnityWebRequest.EscapeURL(context.RoomId) + query,
+            out string lookupUrl, out string error))
+        { completed(false, error); yield break; }
+        using (UnityWebRequest lookup = UnityWebRequest.Get(lookupUrl))
+        {
+            Configure(lookup);
+            if (!TryBegin(lookup, out UnityWebRequestAsyncOperation operation, out error))
+            { completed(false, error); yield break; }
+            yield return operation;
+            if (IsSuccess(lookup)) { completed(true, "cached"); yield break; }
+            if (lookup.responseCode != 404 && lookup.responseCode != 409)
+            { completed(false, "Candidate scene lookup failed: " + DescribeFailure(lookup)); yield break; }
+        }
+
+        SionnaRoomMetadataDto metadata = new SionnaRoomMetadataDto
+        {
+            room_id = context.RoomId,
+            coordinate_frame = SionnaProtocol.CoordinateFrame,
+            mesh_version = meshVersion
+        };
+        List<IMultipartFormSection> sections = new List<IMultipartFormSection>
+        {
+            new MultipartFormDataSection("metadata", JsonUtility.ToJson(metadata)),
+            new MultipartFormFileSection("mesh", objBytes, "candidate-room.obj", "model/obj")
+        };
+        if (!TryBuildUrl("/v1/rooms/" + UnityWebRequest.EscapeURL(context.RoomId) + "/scene",
+            out string uploadUrl, out error))
+        { completed(false, error); yield break; }
+        using (UnityWebRequest upload = UnityWebRequest.Post(uploadUrl, sections))
+        {
+            upload.method = UnityWebRequest.kHttpVerbPUT;
+            Configure(upload);
+            if (!TryBegin(upload, out UnityWebRequestAsyncOperation operation, out error))
+            { completed(false, error); yield break; }
+            yield return operation;
+            if (!IsSuccess(upload))
+            { completed(false, "Candidate scene upload failed: " + DescribeFailure(upload)); yield break; }
+            completed(true, "uploaded");
+        }
+    }
+
     public IEnumerator Trace(RadioLensRoomContext context, Vector3 txLocal, Vector3 rxLocal, string requestId,
         Action<bool, string, SionnaTraceResponseDto> completed)
+    {
+        yield return TraceScene(context, context != null ? context.MeshVersion : null, txLocal, rxLocal,
+            requestId, completed);
+    }
+
+    public IEnumerator TraceScene(RadioLensRoomContext context, string meshVersion, Vector3 txLocal,
+        Vector3 rxLocal, string requestId, Action<bool, string, SionnaTraceResponseDto> completed)
     {
         if (!TryBuildUrl("/v1/trace", out string url, out string error))
         { completed(false, error, null); yield break; }
@@ -99,7 +155,7 @@ public class RadioLensSionnaClient : MonoBehaviour
             room_id = context.RoomId,
             coordinate_frame = SionnaProtocol.CoordinateFrame,
             localization_id = context.LocalizationId,
-            mesh_version = context.MeshVersion,
+            mesh_version = meshVersion,
             tx = new SionnaPositionDto(txLocal),
             rx = new SionnaPositionDto(rxLocal),
             frequency = frequencyHz,

@@ -1,6 +1,9 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using UnityEngine;
 
 [Serializable]
@@ -61,6 +64,7 @@ public class ReflectorOptimizationController : MonoBehaviour
     private readonly List<RecommendedReflectorData> recommendations = new List<RecommendedReflectorData>();
     private readonly List<RtSurfaceTriangle> acceptedTriangles = new List<RtSurfaceTriangle>();
     private readonly List<GameObject> reflectorVisuals = new List<GameObject>();
+    private readonly List<ReflectorVisualBinding> reflectorBindings = new List<ReflectorVisualBinding>();
     private APPlacementState phase = APPlacementState.EditingCandidates;
     private Transform leftController;
     private Transform assumedTx;
@@ -69,11 +73,26 @@ public class ReflectorOptimizationController : MonoBehaviour
     private RtFloorField floorField;
     private SimpleRayTracer tracer;
     private SceneColliderBaker baker;
+    private RadioLensRoomContext sionnaRoom;
+    private RadioLensSionnaClient sionnaClient;
+    private RadioLensPropagationController propagation;
     private float deleteHeld;
     private bool assumedTxNearby;
     private Renderer[] assumedTxRenderers;
     private int evaluationId;
     private List<RtFloorField.RtCell> latestCells;
+    private ReflectorVisualBinding nearbyReflector;
+
+    private sealed class ReflectorVisualBinding
+    {
+        public RecommendedReflectorData data;
+        public GameObject panel;
+        public GameObject target;
+        public Renderer renderer;
+        public Color baseColor;
+        public float deleteHeld;
+        public MaterialPropertyBlock properties;
+    }
 
     public bool Active { get; set; }
     public bool IsEvaluating => phase == APPlacementState.Evaluating;
@@ -96,20 +115,31 @@ public class ReflectorOptimizationController : MonoBehaviour
 
     private void Update()
     {
-        if (!Active || phase == APPlacementState.Evaluating || assumedTx == null || leftController == null) return;
-        bool near = (leftController.position - assumedTx.position).sqrMagnitude <= deleteProximity * deleteProximity;
+        if (!Active || phase == APPlacementState.Evaluating || leftController == null) return;
+        bool near = assumedTx != null &&
+            (leftController.position - assumedTx.position).sqrMagnitude <= deleteProximity * deleteProximity;
         if (near != assumedTxNearby)
         {
             assumedTxNearby = near;
             SetAssumedTxHighlight(near);
             if (near) StartCoroutine(ProximityHaptic());
         }
-        if (near && OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.LTouch))
+        if (near)
         {
-            deleteHeld += Time.unscaledDeltaTime;
-            if (deleteHeld >= deleteHoldSeconds) RemoveAssumedTx();
+            ResetReflectorDeletionVisual(nearbyReflector);
+            nearbyReflector = null;
+            if (OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.LTouch))
+            {
+                deleteHeld += Time.unscaledDeltaTime;
+                if (deleteHeld >= deleteHoldSeconds) RemoveAssumedTx();
+            }
+            else deleteHeld = 0f;
         }
-        else deleteHeld = 0f;
+        else
+        {
+            deleteHeld = 0f;
+            UpdateReflectorDeletion();
+        }
     }
 
     private void ResolveDependencies()
@@ -118,6 +148,9 @@ public class ReflectorOptimizationController : MonoBehaviour
         if (floorField == null) floorField = FindFirstObjectByType<RtFloorField>();
         if (tracer == null) tracer = FindFirstObjectByType<SimpleRayTracer>();
         if (baker == null) baker = FindFirstObjectByType<SceneColliderBaker>();
+        if (sionnaRoom == null) sionnaRoom = FindFirstObjectByType<RadioLensRoomContext>();
+        if (sionnaClient == null) sionnaClient = FindFirstObjectByType<RadioLensSionnaClient>();
+        if (propagation == null) propagation = FindFirstObjectByType<RadioLensPropagationController>();
         Transform room = RoomAlignmentManager.Instance != null ? RoomAlignmentManager.Instance.DatasetRoot : null;
         if (container == null && room != null)
         {
@@ -172,6 +205,89 @@ public class ReflectorOptimizationController : MonoBehaviour
         OVRInput.SetControllerVibration(.25f, .25f, OVRInput.Controller.LTouch);
         yield return new WaitForSecondsRealtime(.06f);
         OVRInput.SetControllerVibration(0f, 0f, OVRInput.Controller.LTouch);
+    }
+
+    private void UpdateReflectorDeletion()
+    {
+        ReflectorVisualBinding closest = null;
+        float closestDistance = deleteProximity * deleteProximity;
+        for (int i = 0; i < reflectorBindings.Count; i++)
+        {
+            ReflectorVisualBinding binding = reflectorBindings[i];
+            if (binding == null || binding.panel == null || !binding.panel.activeInHierarchy) continue;
+            float distance = (leftController.position - binding.panel.transform.position).sqrMagnitude;
+            if (distance <= closestDistance) { closestDistance = distance; closest = binding; }
+        }
+        if (closest != nearbyReflector)
+        {
+            ResetReflectorDeletionVisual(nearbyReflector);
+            nearbyReflector = closest;
+            if (nearbyReflector != null)
+            {
+                nearbyReflector.deleteHeld = 0f;
+                ApplyReflectorDeletionColor(nearbyReflector, 0f);
+                StartCoroutine(ProximityHaptic());
+            }
+        }
+        if (nearbyReflector == null) return;
+        if (OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.LTouch))
+        {
+            nearbyReflector.deleteHeld += Time.unscaledDeltaTime;
+            ApplyReflectorDeletionColor(nearbyReflector,
+                nearbyReflector.deleteHeld / Mathf.Max(deleteHoldSeconds, .05f));
+            if (nearbyReflector.deleteHeld >= deleteHoldSeconds) RemoveReflector(nearbyReflector);
+        }
+        else if (nearbyReflector.deleteHeld > 0f)
+        {
+            nearbyReflector.deleteHeld = 0f;
+            ApplyReflectorDeletionColor(nearbyReflector, 0f);
+        }
+    }
+
+    private void RemoveReflector(ReflectorVisualBinding binding)
+    {
+        int index = reflectorBindings.IndexOf(binding);
+        if (index < 0) return;
+        string reflectorId = binding.data != null ? binding.data.reflectorId : "reflector";
+        recommendations.Remove(binding.data);
+        int triangleIndex = index * 2;
+        if (triangleIndex >= 0 && triangleIndex + 1 < acceptedTriangles.Count)
+            acceptedTriangles.RemoveRange(triangleIndex, 2);
+        tracer?.SetEngineeredReflectors(acceptedTriangles);
+        reflectorVisuals.Remove(binding.panel);
+        reflectorVisuals.Remove(binding.target);
+        if (binding.panel != null) Destroy(binding.panel);
+        if (binding.target != null) Destroy(binding.target);
+        reflectorBindings.RemoveAt(index);
+        nearbyReflector = null;
+        latestCells = null;
+        floorField?.ClearCandidateDataset();
+        Debug.Log("[ReflectorMode] Deleted " + reflectorId + ". Reflector count=" + recommendations.Count + ".");
+    }
+
+    private static void ApplyReflectorDeletionColor(ReflectorVisualBinding binding, float progress)
+    {
+        if (binding == null || binding.renderer == null) return;
+        Color color = Color.Lerp(new Color(1f, .15f, .15f, .9f), Color.white, Mathf.Clamp01(progress));
+        ApplyReflectorColor(binding, color);
+    }
+
+    private static void ResetReflectorDeletionVisual(ReflectorVisualBinding binding)
+    {
+        if (binding == null) return;
+        binding.deleteHeld = 0f;
+        ApplyReflectorColor(binding, binding.baseColor);
+    }
+
+    private static void ApplyReflectorColor(ReflectorVisualBinding binding, Color color)
+    {
+        if (binding == null || binding.renderer == null) return;
+        if (binding.properties == null) binding.properties = new MaterialPropertyBlock();
+        binding.renderer.GetPropertyBlock(binding.properties);
+        binding.properties.SetColor("_Color", color);
+        binding.properties.SetColor("_BaseColor", color);
+        binding.properties.SetColor("_EmissionColor", color * .5f);
+        binding.renderer.SetPropertyBlock(binding.properties);
     }
 
     public void RequestAnalysis()
@@ -334,6 +450,11 @@ public class ReflectorOptimizationController : MonoBehaviour
 
     private IEnumerator SearchReflector(Vector3 tx, RFDeadZoneData zone, List<RtFloorField.RtCell> baseline, Action<SearchResult> done)
     {
+        if (propagation != null && propagation.CurrentBackend == PropagationBackend.Sionna)
+        {
+            yield return SearchReflectorSionna(tx, zone, baseline, done);
+            yield break;
+        }
         Dictionary<Vector2Int, float> baselineValues = new Dictionary<Vector2Int, float>();
         for (int i = 0; i < baseline.Count; i++) baselineValues[baseline[i].index] = baseline[i].predictedRssiDb;
         List<RtSurfaceTriangle> mounts = new List<RtSurfaceTriangle>();
@@ -378,6 +499,143 @@ public class ReflectorOptimizationController : MonoBehaviour
         done(best);
     }
 
+    private IEnumerator SearchReflectorSionna(Vector3 tx, RFDeadZoneData zone,
+        List<RtFloorField.RtCell> baseline, Action<SearchResult> done)
+    {
+        if (sionnaRoom == null || !sionnaRoom.IsReady || sionnaClient == null)
+        { Report("Sionna room or client is not ready."); done(null); yield break; }
+        int roomRevision = sionnaRoom.Revision;
+        List<RtSurfaceTriangle> mounts = new List<RtSurfaceTriangle>();
+        IReadOnlyList<RtSurfaceTriangle> surfaces = baker.SurfaceTriangles;
+        for (int i = 0; i < surfaces.Count && mounts.Count < maximumMountingSamples; i++)
+            if (Mathf.Abs(Vector3.Dot(surfaces[i].normalWorld, Vector3.up)) < .35f) mounts.Add(surfaces[i]);
+
+        List<float> before = null;
+        yield return EvaluateSionnaPanels(tx, zone, acceptedTriangles, roomRevision, values => before = values);
+        if (before == null) { done(null); yield break; }
+
+        SearchResult best = null;
+        int tested = 0;
+        for (int m = 0; m < mounts.Count && tested < maximumSearchConfigurations; m++)
+        {
+            Vector3 center = (mounts[m].pointAWorld + mounts[m].pointBWorld + mounts[m].pointCWorld) / 3f;
+            Vector3 normal = ((tx - center).normalized + (zone.weightedCentroidWorld - center).normalized).normalized;
+            if (normal.sqrMagnitude < .01f) normal = mounts[m].normalWorld;
+            Quaternion initial = Quaternion.LookRotation(normal, Vector3.up);
+            for (float yaw = -angleSearchDegrees; yaw <= angleSearchDegrees && tested < maximumSearchConfigurations;
+                yaw += Mathf.Max(1f, angleStepDegrees))
+            for (float pitch = -angleSearchDegrees; pitch <= angleSearchDegrees && tested < maximumSearchConfigurations;
+                pitch += Mathf.Max(1f, angleStepDegrees))
+            {
+                Quaternion yawRotation = Quaternion.AngleAxis(yaw, Vector3.up) * initial;
+                Quaternion rotation = Quaternion.AngleAxis(pitch, yawRotation * Vector3.right) * yawRotation;
+                List<RtSurfaceTriangle> trialPanel = BuildPanel(center, rotation);
+                List<RtSurfaceTriangle> trial = new List<RtSurfaceTriangle>(acceptedTriangles);
+                trial.AddRange(trialPanel);
+                List<float> after = null;
+                propagation?.SetStatus("Sionna reflector ranking: candidate " + (tested + 1) + "/" +
+                    maximumSearchConfigurations + " for " + zone.zoneId);
+                yield return EvaluateSionnaPanels(tx, zone, trial, roomRevision, values => after = values);
+                if (after == null) { done(null); yield break; }
+                float oldMean = Mean(before), newMean = Mean(after);
+                float oldP10 = P10(before), newP10 = P10(after);
+                int recovered = 0;
+                for (int i = 0; i < Mathf.Min(before.Count, after.Count); i++)
+                    if (before[i] < -90f && after[i] >= -90f) recovered++;
+                float recovery = before.Count > 0 ? recovered * 100f / before.Count : 0f;
+                float score = .5f * recovery + .3f * Mathf.Max(0f, newP10 - oldP10) * 10f +
+                    .2f * Mathf.Max(0f, newMean - oldMean) * 10f;
+                if (best == null || score > best.score) best = new SearchResult
+                {
+                    center = center, rotation = rotation, triangles = trialPanel,
+                    p10Improvement = newP10 - oldP10, meanImprovement = newMean - oldMean,
+                    recoveredCoverage = recovery, score = score
+                };
+                tested++;
+            }
+        }
+        propagation?.SetStatus(best != null ? "Sionna reflector candidate selected." : "No Sionna reflector candidate found.");
+        done(best);
+    }
+
+    private IEnumerator EvaluateSionnaPanels(Vector3 txWorld, RFDeadZoneData zone,
+        IReadOnlyList<RtSurfaceTriangle> panels, int roomRevision, Action<List<float>> done)
+    {
+        if (!TryBuildCandidateObj(panels, out byte[] objBytes, out string meshVersion))
+        { done(null); yield break; }
+        bool sceneOk = false; string sceneError = null;
+        yield return sionnaClient.EnsureScene(sionnaRoom, objBytes, meshVersion,
+            (ok, error) => { sceneOk = ok; sceneError = error; });
+        if (!SionnaEvaluationIsCurrent(roomRevision) || !sceneOk)
+        {
+            if (!sceneOk) Report(sceneError);
+            done(null); yield break;
+        }
+        Vector3 txLocal = sionnaRoom.RoomAnchor.InverseTransformPoint(txWorld);
+        List<float> values = new List<float>();
+        for (int i = 0; i < zone.indices.Count; i++)
+        {
+            Vector3 floorLocal = floorField.GridIndexToFloorLocal(zone.indices[i]);
+            Vector3 rxGridLocal = new Vector3(floorLocal.x, floorField.floorY + floorField.ueHeight, floorLocal.z);
+            Vector3 rxWorld = floorField.CoordinateFrameRoot.TransformPoint(rxGridLocal);
+            Vector3 rxLocal = sionnaRoom.RoomAnchor.InverseTransformPoint(rxWorld);
+            string requestId = Guid.NewGuid().ToString();
+            bool traceOk = false; SionnaTraceResponseDto response = null; string traceError = null;
+            yield return sionnaClient.TraceScene(sionnaRoom, meshVersion, txLocal, rxLocal, requestId,
+                (ok, error, result) => { traceOk = ok; traceError = error; response = result; });
+            if (!SionnaEvaluationIsCurrent(roomRevision) || !traceOk || response == null ||
+                response.requestId != requestId || response.meshVersion != meshVersion)
+            {
+                if (!traceOk) Report("Sionna reflector trace failed: " + traceError);
+                done(null); yield break;
+            }
+            double gain = 0d;
+            for (int p = 0; p < response.paths.Count; p++)
+                if (response.paths[p].pathGain > 0d && !double.IsNaN(response.paths[p].pathGain))
+                    gain += response.paths[p].pathGain;
+            values.Add(gain > 0d ? (float)(10d * Math.Log10(gain)) : -140f);
+        }
+        done(values);
+    }
+
+    private bool TryBuildCandidateObj(IReadOnlyList<RtSurfaceTriangle> panels, out byte[] bytes, out string version)
+    {
+        bytes = null; version = null;
+        if (sionnaRoom == null || sionnaRoom.ObjBytes == null || sionnaRoom.RoomAnchor == null) return false;
+        StringBuilder obj = new StringBuilder(Encoding.UTF8.GetString(sionnaRoom.ObjBytes));
+        if (obj.Length > 0 && obj[obj.Length - 1] != '\n') obj.AppendLine();
+        int vertexOffset = 0;
+        string source = obj.ToString();
+        using (System.IO.StringReader reader = new System.IO.StringReader(source))
+            while (reader.ReadLine() is string line) if (line.StartsWith("v ", StringComparison.Ordinal)) vertexOffset++;
+        obj.AppendLine("o engineered_reflectors");
+        for (int i = 0; panels != null && i < panels.Count; i++)
+        {
+            Vector3 a = sionnaRoom.RoomAnchor.InverseTransformPoint(panels[i].pointAWorld);
+            Vector3 b = sionnaRoom.RoomAnchor.InverseTransformPoint(panels[i].pointBWorld);
+            Vector3 c = sionnaRoom.RoomAnchor.InverseTransformPoint(panels[i].pointCWorld);
+            obj.Append("v ").Append(F(a.x)).Append(' ').Append(F(a.y)).Append(' ').Append(F(a.z)).AppendLine();
+            obj.Append("v ").Append(F(b.x)).Append(' ').Append(F(b.y)).Append(' ').Append(F(b.z)).AppendLine();
+            obj.Append("v ").Append(F(c.x)).Append(' ').Append(F(c.y)).Append(' ').Append(F(c.z)).AppendLine();
+            int first = vertexOffset + i * 3 + 1;
+            obj.Append("f ").Append(first).Append(' ').Append(first + 1).Append(' ').Append(first + 2).AppendLine();
+        }
+        bytes = new UTF8Encoding(false).GetBytes(obj.ToString());
+        using (SHA256 sha = SHA256.Create())
+        {
+            byte[] digest = sha.ComputeHash(bytes); StringBuilder hex = new StringBuilder(digest.Length * 2);
+            for (int i = 0; i < digest.Length; i++) hex.Append(digest[i].ToString("x2", CultureInfo.InvariantCulture));
+            version = "sha256:" + hex;
+        }
+        return true;
+    }
+
+    private bool SionnaEvaluationIsCurrent(int roomRevision) => phase == APPlacementState.Evaluating &&
+        propagation != null && propagation.CurrentBackend == PropagationBackend.Sionna &&
+        sionnaRoom != null && sionnaRoom.Revision == roomRevision;
+
+    private static string F(float value) => value.ToString("R", CultureInfo.InvariantCulture);
+
     private List<RtSurfaceTriangle> BuildPanel(Vector3 center, Quaternion rotation)
     {
         Vector3 right = rotation * Vector3.right * reflectorWidth * .5f;
@@ -404,7 +662,9 @@ public class ReflectorOptimizationController : MonoBehaviour
         visual.name = data.reflectorId; visual.transform.SetPositionAndRotation(result.center, result.rotation);
         visual.transform.localScale = new Vector3(reflectorWidth, reflectorHeight, reflectorThickness);
         visual.transform.SetParent(container, true);
-        Renderer renderer = visual.GetComponent<Renderer>(); renderer.material.color = order == 1 ? Color.green : Color.cyan;
+        Renderer renderer = visual.GetComponent<Renderer>();
+        Color baseColor = order == 1 ? Color.green : Color.cyan;
+        renderer.material.color = baseColor;
         GameObject labelObject = new GameObject("Label"); labelObject.transform.SetParent(visual.transform, false);
         labelObject.transform.localPosition = new Vector3(0f, .6f, 0f); labelObject.transform.localScale = Vector3.one * 2f;
         TextMesh label = labelObject.AddComponent<TextMesh>(); label.anchor = TextAnchor.MiddleCenter; label.characterSize = .025f;
@@ -419,6 +679,11 @@ public class ReflectorOptimizationController : MonoBehaviour
         target.GetComponent<Renderer>().material.color = new Color(1f, .15f, .05f, .65f);
         Collider targetCollider = target.GetComponent<Collider>(); if (targetCollider != null) Destroy(targetCollider);
         reflectorVisuals.Add(target);
+        reflectorBindings.Add(new ReflectorVisualBinding
+        {
+            data = data, panel = visual, target = target, renderer = renderer, baseColor = baseColor,
+            properties = new MaterialPropertyBlock()
+        });
     }
 
     public void SetVisualsVisible(bool visible)
@@ -432,6 +697,7 @@ public class ReflectorOptimizationController : MonoBehaviour
     private void ClearReflectorResults()
     {
         recommendations.Clear(); acceptedTriangles.Clear(); tracer?.ClearEngineeredReflectors(); latestCells = null;
+        ResetReflectorDeletionVisual(nearbyReflector); nearbyReflector = null; reflectorBindings.Clear();
         for (int i = 0; i < reflectorVisuals.Count; i++) if (reflectorVisuals[i] != null) Destroy(reflectorVisuals[i]);
         reflectorVisuals.Clear(); floorField?.ClearCandidateDataset();
     }

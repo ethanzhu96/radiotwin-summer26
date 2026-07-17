@@ -117,8 +117,6 @@ public class RFOptimizationWorkflowManager : MonoBehaviour
 
     public void HandleEvaluatePressed()
     {
-        if (CurrentBackend == PropagationBackend.Sionna && CurrentMode == RFOptimizationMode.Reflector)
-            propagation?.ReportSimpleRecommendationFallback();
         Debug.Log("[RFWorkflow] Evaluation routed to " + CurrentMode + ".");
         if (CurrentMode == RFOptimizationMode.Router) routerPlacement?.RequestEvaluation();
         else reflector?.RequestAnalysis();
