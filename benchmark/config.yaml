@@ -1,0 +1,30 @@
+data:
+  # Relative paths are resolved from the repository root.
+  rf_csv: "rf_trajectory_log.csv"
+  target_bssid: null
+
+quest_sync:
+  enabled: true
+  adb_path: "C:/Program Files/Unity/Hub/Editor/6000.4.10f1/Editor/Data/PlaybackEngines/AndroidPlayer/SDK/platform-tools/adb.exe"
+  package_name: "com.DefaultCompany.RadioTwin_Quest_DataCollector"
+
+split:
+  mode: "segment"
+  segment_start_fraction: 0.6
+  test_fraction: 0.2
+
+gp:
+  matern_nu: 1.5
+  n_restarts_optimizer: 5
+  random_state: 42
+
+radiomap:
+  eval_height_mode: "median_measurement"
+  # Set a number to explicitly override the automatic median measurement height.
+  eval_height_m: null
+  grid_resolution_m: 0.10
+  bounds_padding_m: 0.20
+  vmin_dbm: -90
+  vmax_dbm: -30
+  save_debug_autoscaled: true
+  output_dir: "benchmark/outputs"

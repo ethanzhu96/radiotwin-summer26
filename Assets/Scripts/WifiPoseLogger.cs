@@ -8,6 +8,15 @@ using Meta.XR.MRUtilityKit;
 using UnityEngine.Android;
 #endif
 
+[Serializable]
+public class TxAnchorLoggingMetadata
+{
+    public string room_uuid;
+    public float x;
+    public float y;
+    public float z;
+}
+
 public class WifiPoseLogger : MonoBehaviour
 {
     public Transform centerEyeAnchor;
@@ -17,6 +26,7 @@ public class WifiPoseLogger : MonoBehaviour
     public bool requireMRUKRoomAnchorForLogging = true;
 
     public string fileName = "rf_trajectory_log.csv";
+    public string txAnchorFileName = "tx_anchor.json";
     public string metadataFileName = RoomAlignmentManager.DefaultMetadataFileName;
     public string meshFileName = "quest_room_mesh.obj";
     public float sampleIntervalSeconds = 1.0f;
@@ -25,6 +35,9 @@ public class WifiPoseLogger : MonoBehaviour
     public bool isLogging = false;
     public KeyCode toggleLoggingKey = KeyCode.S;
     public bool overwriteFileWhenLoggingStarts = true;
+
+    [Header("TX Anchor")]
+    public TxLineOfSightVisualizer txAnchorManager;
 
     [Header("Status Display")]
     public bool showStatusDisplay = true;
@@ -196,25 +209,102 @@ public class WifiPoseLogger : MonoBehaviour
 
     public void ToggleLogging()
     {
-        isLogging = !isLogging;
         timer = 0f;
 
-        if (isLogging)
+        if (!isLogging)
         {
+            Debug.Log("Starting RF logging with TX anchor validation...");
+
+            if (!TrySaveTxAnchorForLogging())
+            {
+                return;
+            }
+
             ResolveRoomAnchor();
             if (!InitializeLogFileForSession())
             {
-                isLogging = false;
                 ShowStatusMessage("ROOM REQUIRED");
                 return;
             }
+
+            isLogging = true;
             Debug.LogError("WIFI_POSE_LOGGER_RESUMED");
             ShowStatusMessage(usingMRUKRoomAnchor ? "ROOM OK" : "WAIT ROOM");
+            Debug.Log("RF logging started successfully.");
         }
         else
         {
+            isLogging = false;
             Debug.LogError("WIFI_POSE_LOGGER_PAUSED");
             ShowStatusMessage("LOGGING STOPPED");
+        }
+    }
+
+    bool TrySaveTxAnchorForLogging()
+    {
+        if (txAnchorManager == null)
+        {
+            txAnchorManager = FindFirstObjectByType<TxLineOfSightVisualizer>();
+        }
+
+        Transform txTransform = txAnchorManager != null && txAnchorManager.HasTxMarker()
+            ? txAnchorManager.CurrentMarkerTransform
+            : null;
+
+        if (txTransform == null)
+        {
+            const string message = "Place the router/TX anchor before starting measurement.";
+            Debug.LogError(message);
+            ShowStatusMessage(message);
+            return false;
+        }
+
+        if (MRUK.Instance == null || !MRUK.Instance.IsInitialized || MRUK.Instance.GetCurrentRoom() == null)
+        {
+            const string message = "Room not loaded. Cannot start measurement.";
+            Debug.LogError(message);
+            ShowStatusMessage(message);
+            return false;
+        }
+
+        MRUKRoom currentRoom = MRUK.Instance.GetCurrentRoom();
+        Guid roomUuid = currentRoom.Anchor.Uuid;
+        if (roomUuid == Guid.Empty ||
+            !RoomAlignmentManager.TryGetCaptureReferenceAnchor(currentRoom, out MRUKAnchor referenceAnchor))
+        {
+            const string message = "Room not loaded. Cannot start measurement.";
+            Debug.LogError(message + " No stable MRUK capture reference anchor is available.");
+            ShowStatusMessage(message);
+            return false;
+        }
+
+        Quaternion referenceRotation =
+            referenceAnchor.transform.rotation * RoomAlignmentManager.GetUprightReferenceLocalRotation(referenceAnchor);
+        Vector3 txRoomLocal = Quaternion.Inverse(referenceRotation) *
+            (txTransform.position - referenceAnchor.transform.position);
+
+        TxAnchorLoggingMetadata metadata = new TxAnchorLoggingMetadata
+        {
+            room_uuid = roomUuid.ToString(),
+            x = txRoomLocal.x,
+            y = txRoomLocal.y,
+            z = txRoomLocal.z
+        };
+
+        string txAnchorPath = Path.Combine(Application.persistentDataPath, txAnchorFileName);
+        try
+        {
+            File.WriteAllText(txAnchorPath, JsonUtility.ToJson(metadata, true));
+            Debug.Log("TX room-local position: " + txRoomLocal.ToString("F3"));
+            Debug.Log("Saved TX metadata to: " + txAnchorPath);
+            return true;
+        }
+        catch (Exception e)
+        {
+            const string message = "Failed to save TX anchor. Cannot start measurement.";
+            Debug.LogError(message + " Path: " + txAnchorPath + " Error: " + e);
+            ShowStatusMessage(message);
+            return false;
         }
     }
 
