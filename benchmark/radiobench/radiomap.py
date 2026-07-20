@@ -48,6 +48,7 @@ def generate_radio_map(
     vmin_dbm: float,
     vmax_dbm: float,
     save_debug_autoscaled: bool = False,
+    allow_missing_predictions: bool = False,
 ) -> RadioMapResult:
     """Predict and save an x-z radio map in Unity/MRUK room-local coordinates."""
     positions = np.asarray(measurement_positions, dtype=float)
@@ -90,12 +91,15 @@ def generate_radio_map(
         raise ValueError(
             f"Model returned prediction shape {predictions.shape}; expected {(point_count,)}."
         )
-    if not np.all(np.isfinite(predictions)):
+    finite_predictions = predictions[np.isfinite(predictions)]
+    if not allow_missing_predictions and finite_predictions.size != predictions.size:
         raise ValueError("Radio-map predictions contain NaN or infinite values.")
-    if predictions.min() < -150 or predictions.max() > 20:
+    if finite_predictions.size == 0:
+        raise ValueError("Radio-map has no finite model predictions.")
+    if finite_predictions.min() < -150 or finite_predictions.max() > 20:
         warnings.warn(
             "Radio-map predictions extend outside a broad plausible RSSI range "
-            f"({predictions.min():.2f} to {predictions.max():.2f} dBm).",
+            f"({finite_predictions.min():.2f} to {finite_predictions.max():.2f} dBm).",
             stacklevel=2,
         )
     rssi_grid = predictions.reshape(x_grid.shape)
@@ -133,7 +137,7 @@ def generate_radio_map(
         heatmap = axis.pcolormesh(
             x_grid,
             z_grid,
-            rssi_grid,
+            np.ma.masked_invalid(rssi_grid),
             shading="auto",
             cmap="viridis",
             vmin=color_min,
@@ -168,8 +172,9 @@ def generate_radio_map(
 
     save_figure(png_path, vmin_dbm, vmax_dbm, debug=False)
     if debug_png_path is not None:
-        prediction_min = float(rssi_grid.min())
-        prediction_max = float(rssi_grid.max())
+        finite_grid = rssi_grid[np.isfinite(rssi_grid)]
+        prediction_min = float(finite_grid.min())
+        prediction_max = float(finite_grid.max())
         if np.isclose(prediction_min, prediction_max):
             debug_min = prediction_min - 0.5
             debug_max = prediction_max + 0.5

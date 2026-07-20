@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import sys
 import warnings
 
@@ -19,10 +20,16 @@ try:
     import numpy as np
     import yaml
 
-    from radiobench.data import contiguous_segment_split, load_rf_csv
-    from radiobench.metrics import calculate_metrics, format_metrics
+    from radiobench.data import contiguous_segment_split, load_rf_csv, load_tx_anchor
+    from radiobench.mesh import SceneMesh
+    from radiobench.metrics import (
+        calculate_covered_metrics,
+        calculate_metrics,
+        format_metrics,
+    )
     from radiobench.models.gp import GaussianProcessRadioModel
-    from radiobench.quest_sync import sync_rf_csv_from_quest
+    from radiobench.models.simple_rt import SimpleRTModel, save_los_diagnostic
+    from radiobench.quest_sync import sync_file_from_quest
     from radiobench.radiomap import generate_radio_map
 except ModuleNotFoundError as error:
     _dependency_error(error)
@@ -94,11 +101,68 @@ def resolve_radiomap_height(dataset, radiomap_config: dict) -> tuple[float, floa
     return chosen_height, y_min, y_median, y_max
 
 
+def print_bounds(label: str, bounds: np.ndarray) -> None:
+    print(label)
+    for index, axis in enumerate("xyz"):
+        print(f"  {axis}: {bounds[0, index]:.3f} -> {bounds[1, index]:.3f} m")
+
+
+def warn_if_geometry_misaligned(tx: np.ndarray, rx: np.ndarray, mesh_bounds: np.ndarray) -> None:
+    extent = np.maximum(mesh_bounds[1] - mesh_bounds[0], 1.0)
+    margin = np.maximum(extent * 0.25, 1.0)
+    lower = mesh_bounds[0] - margin
+    upper = mesh_bounds[1] + margin
+    if np.any(tx < lower) or np.any(tx > upper):
+        warnings.warn(
+            "TX is wildly outside the mesh bounds; Simplified RT results may have a "
+            "coordinate-frame or stale-export mismatch.",
+            stacklevel=2,
+        )
+    outside_rx = np.any((rx < lower) | (rx > upper), axis=1)
+    if np.any(outside_rx):
+        warnings.warn(
+            f"{int(outside_rx.sum())} RX samples are wildly outside the mesh bounds; "
+            "Simplified RT alignment may be invalid.",
+            stacklevel=2,
+        )
+
+
+def load_metadata_room_uuid(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    with path.open("r", encoding="utf-8") as stream:
+        payload = json.load(stream)
+    room_uuid = payload.get("roomUuid")
+    return str(room_uuid).strip() if room_uuid else None
+
+
+def print_comparison(gp_metrics, simple_metrics) -> None:
+    print("\n" + "=" * 86)
+    print("MODEL COMPARISON - TEST SET")
+    print("=" * 86)
+    print("Model                     RMSE    MAE    Bias   MaxErr      r   Coverage")
+    print("-" * 86)
+    print(
+        f"{'Gaussian Process':25} {gp_metrics.rmse:6.2f} {gp_metrics.mae:6.2f} "
+        f"{gp_metrics.bias:7.2f} {gp_metrics.max_abs_error:8.2f} "
+        f"{gp_metrics.pearson_r:6.3f}   100.0%"
+    )
+    metrics = simple_metrics.metrics
+    print(
+        f"{'Simple RT (LOS-only)':25} {metrics.rmse:6.2f} {metrics.mae:6.2f} "
+        f"{metrics.bias:7.2f} {metrics.max_abs_error:8.2f} "
+        f"{metrics.pearson_r:6.3f} {simple_metrics.coverage * 100:7.1f}%"
+    )
+    print("Simple RT metrics are on valid LOS-covered test samples only.")
+    print("=" * 86)
+
+
 def main() -> int:
     config = load_config()
     data_config = config.get("data", {})
     split_config = config.get("split", {})
     gp_config = config.get("gp", {})
+    simple_rt_config = config.get("simple_rt", {})
     sync_config = config.get("quest_sync", {})
     radiomap_config = config.get("radiomap", {})
     if not data_config.get("rf_csv"):
@@ -107,6 +171,11 @@ def main() -> int:
         raise ValueError("Only split.mode='segment' is supported in the GP benchmark.")
 
     rf_csv_path = resolve_data_path(data_config["rf_csv"])
+    tx_anchor_path = resolve_data_path(data_config.get("tx_anchor_json", "tx_anchor.json"))
+    mesh_path = resolve_data_path(data_config.get("room_mesh_obj", "quest_room_mesh.obj"))
+    metadata_path = resolve_data_path(
+        data_config.get("dataset_metadata_json", "rf_dataset_metadata.json")
+    )
     if sync_config.get("enabled", False):
         adb_path = sync_config.get("adb_path")
         package_name = sync_config.get("package_name")
@@ -114,9 +183,19 @@ def main() -> int:
             raise ValueError(
                 "quest_sync.enabled requires quest_sync.adb_path and package_name."
             )
-        print("Syncing latest RF trajectory from Quest...")
-        sync_rf_csv_from_quest(adb_path, package_name, rf_csv_path)
-        print(f"Updated local RF CSV: {rf_csv_path}")
+        sync_targets = [("rf_trajectory_log.csv", rf_csv_path)]
+        if simple_rt_config.get("enabled", True):
+            sync_targets.extend(
+                [
+                    ("tx_anchor.json", tx_anchor_path),
+                    ("quest_room_mesh.obj", mesh_path),
+                    ("rf_dataset_metadata.json", metadata_path),
+                ]
+            )
+        print("Syncing latest benchmark exports from Quest...")
+        for file_name, destination in sync_targets:
+            sync_file_from_quest(adb_path, package_name, file_name, destination)
+            print(f"  Updated: {destination}")
 
     dataset = load_rf_csv(
         rf_csv_path,
@@ -172,6 +251,94 @@ def main() -> int:
     print("\nLearned kernel:")
     print(model.learned_kernel)
 
+    simple_model = None
+    simple_test_metrics = None
+    simple_all_los = None
+    diagnostic_path = None
+    if simple_rt_config.get("enabled", True):
+        tx_metadata = load_tx_anchor(tx_anchor_path)
+        metadata_room_uuid = load_metadata_room_uuid(metadata_path)
+        if (
+            tx_metadata.room_uuid
+            and metadata_room_uuid
+            and tx_metadata.room_uuid.casefold() != metadata_room_uuid.casefold()
+        ):
+            raise ValueError(
+                "TX room UUID does not match RF dataset metadata room UUID. "
+                "Re-export a consistent TX/trajectory/mesh dataset."
+            )
+        scene_mesh = SceneMesh(
+            mesh_path,
+            ray_epsilon_m=float(simple_rt_config.get("ray_epsilon_m", 0.01)),
+        )
+        tx = tx_metadata.position
+        rx_bounds = np.vstack((dataset.positions.min(axis=0), dataset.positions.max(axis=0)))
+        print("\nSimplified RT coordinate diagnostics:")
+        print(f"TX room-local: x={tx[0]:.3f}, y={tx[1]:.3f}, z={tx[2]:.3f} m")
+        print_bounds("RX bounds:", rx_bounds)
+        print_bounds("Mesh bounds:", scene_mesh.bounds)
+        print(
+            f"Mesh geometry: {scene_mesh.vertex_count:,} vertices, "
+            f"{scene_mesh.face_count:,} triangles"
+        )
+        print(
+            f"OBJ objects: {scene_mesh.included_object_count} room EffectMesh included, "
+            f"{scene_mesh.excluded_object_count} non-room visualization objects excluded"
+        )
+        warn_if_geometry_misaligned(tx, dataset.positions, scene_mesh.bounds)
+
+        simple_model = SimpleRTModel(simple_rt_config)
+        simple_model.fit(
+            split.train_positions,
+            split.train_rssi,
+            ctx={"mesh": scene_mesh, "tx": tx, "cfg": simple_rt_config},
+        )
+        simple_train_predictions = simple_model.predict(split.train_positions)
+        simple_test_predictions = simple_model.predict(split.test_positions)
+        simple_train_metrics = calculate_covered_metrics(
+            split.train_rssi, simple_train_predictions
+        )
+        simple_test_metrics = calculate_covered_metrics(
+            split.test_rssi, simple_test_predictions
+        )
+        train_los = np.isfinite(simple_train_predictions)
+        test_los = np.isfinite(simple_test_predictions)
+        simple_all_los = simple_model.los_mask(dataset.positions)
+        distances = simple_model.distances(dataset.positions)
+        print("\nSimple RT LOS-only calibration:")
+        print(f"  path-loss exponent n: {simple_model.path_loss_exponent:.3f}")
+        print(f"  TX/global offset:     {simple_model.tx_offset_dbm:.3f} dBm")
+        print(f"  LOS train samples:    {int(train_los.sum())}")
+        print(f"  blocked train:        {int((~train_los).sum())}")
+        print("\nLOS diagnostics:")
+        print(f"  total RX samples:     {dataset.sample_count}")
+        print(f"  LOS:                  {int(simple_all_los.sum())}")
+        print(f"  blocked:              {int((~simple_all_los).sum())}")
+        print(f"  LOS fraction:         {simple_all_los.mean() * 100:.1f}%")
+        print(f"  train LOS/blocked:    {int(train_los.sum())}/{int((~train_los).sum())}")
+        print(f"  test LOS/blocked:     {int(test_los.sum())}/{int((~test_los).sum())}")
+        print(f"  test coverage:        {simple_test_metrics.coverage * 100:.1f}%")
+        print(
+            "  TX-RX distance m:     "
+            f"min={distances.min():.3f}, median={np.median(distances):.3f}, "
+            f"max={distances.max():.3f}"
+        )
+        if simple_all_los.sum() == 0:
+            warnings.warn("Simple RT found 0% LOS; check mesh/TX/RX alignment.", stacklevel=2)
+        elif simple_all_los.all():
+            warnings.warn(
+                "Simple RT found 100% LOS; verify this is plausible for the room and mesh.",
+                stacklevel=2,
+            )
+        diagnostic_path = save_los_diagnostic(
+            resolve_data_path("benchmark/outputs/simple_rt_los_diagnostic.png"),
+            dataset.positions,
+            simple_all_los,
+            tx,
+        )
+        print(f"  diagnostic PNG:       {diagnostic_path}")
+        print_comparison(test_metrics, simple_test_metrics)
+
     map_height, y_min, y_median, y_max = resolve_radiomap_height(
         dataset, radiomap_config
     )
@@ -224,6 +391,42 @@ def main() -> int:
     print(f"  NPZ:          {map_result.npz_path}")
     if map_result.debug_png_path is not None:
         print(f"  Debug PNG:    {map_result.debug_png_path}")
+
+    if simple_model is not None:
+        simple_map_result = generate_radio_map(
+            model=simple_model,
+            measurement_positions=dataset.positions,
+            train_indices=split.train_indices,
+            test_indices=split.test_indices,
+            height_m=map_height,
+            grid_resolution_m=float(radiomap_config.get("grid_resolution_m", 0.10)),
+            bounds_padding_m=float(radiomap_config.get("bounds_padding_m", 0.20)),
+            model_name=simple_model.name,
+            output_dir=output_dir,
+            vmin_dbm=float(radiomap_config.get("vmin_dbm", -90)),
+            vmax_dbm=float(radiomap_config.get("vmax_dbm", -30)),
+            save_debug_autoscaled=bool(
+                radiomap_config.get("save_debug_autoscaled", False)
+            ),
+            allow_missing_predictions=True,
+        )
+        finite_map = simple_map_result.rssi_dbm[
+            np.isfinite(simple_map_result.rssi_dbm)
+        ]
+        print("\nSimple RT LOS-only radio map:")
+        print(f"  Height:       {simple_map_result.height_m:.2f} m")
+        print(f"  Grid:         {simple_map_result.shape[1]} x {simple_map_result.shape[0]}")
+        print(
+            f"  LOS coverage: {finite_map.size}/{simple_map_result.rssi_dbm.size} "
+            f"({finite_map.size / simple_map_result.rssi_dbm.size * 100:.1f}%)"
+        )
+        print(
+            f"  Predicted:    {finite_map.min():.2f} to {finite_map.max():.2f} dBm"
+        )
+        print(f"  PNG:          {simple_map_result.png_path}")
+        print(f"  NPZ:          {simple_map_result.npz_path}")
+        if simple_map_result.debug_png_path is not None:
+            print(f"  Debug PNG:    {simple_map_result.debug_png_path}")
     print("=" * 72)
     return 0
 
@@ -231,5 +434,5 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (FileNotFoundError, ValueError) as error:
+    except (FileNotFoundError, RuntimeError, ValueError) as error:
         raise SystemExit(f"Benchmark configuration/data error: {error}") from error

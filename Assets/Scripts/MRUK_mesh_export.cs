@@ -193,6 +193,11 @@ public class MRUKMeshExporter : MonoBehaviour
         string objectName = meshFilter.gameObject.name;
         string parentName = meshFilter.transform.parent != null ? meshFilter.transform.parent.name : "";
 
+        if (objectName.StartsWith("M0_RSSI_POINT_", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
         return objectName.Contains("EffectMesh") ||
             objectName.Contains("WALL") ||
             objectName.Contains("FLOOR") ||

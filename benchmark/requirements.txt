@@ -3,3 +3,5 @@ pandas
 scikit-learn
 PyYAML
 matplotlib
+trimesh
+rtree

@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+import json
 import warnings
 
 import numpy as np
@@ -29,6 +30,35 @@ class DatasetSplit:
     test_indices: np.ndarray
     test_start: int
     test_end: int
+
+
+@dataclass(frozen=True)
+class TxAnchorMetadata:
+    position: np.ndarray
+    room_uuid: str | None
+
+
+def load_tx_anchor(path: str | Path) -> TxAnchorMetadata:
+    tx_path = Path(path)
+    message = (
+        "Simplified RT requires a valid TX anchor position. Place the router "
+        "anchor and record/export TX metadata before running RT."
+    )
+    if not tx_path.is_file():
+        raise FileNotFoundError(f"{message} Missing file: {tx_path}")
+    try:
+        with tx_path.open("r", encoding="utf-8") as stream:
+            payload = json.load(stream)
+        position = np.asarray([payload[axis] for axis in ("x", "y", "z")], dtype=float)
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+        raise ValueError(f"{message} Invalid file {tx_path}: {error}") from error
+    if position.shape != (3,) or not np.all(np.isfinite(position)):
+        raise ValueError(f"{message} TX coordinates must be finite numeric x/y/z values.")
+    room_uuid = payload.get("room_uuid")
+    return TxAnchorMetadata(
+        position=position,
+        room_uuid=str(room_uuid).strip() if room_uuid else None,
+    )
 
 
 def _position_columns(columns: pd.Index) -> tuple[str, str, str]:

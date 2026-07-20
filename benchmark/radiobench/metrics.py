@@ -13,6 +13,17 @@ class MetricResult:
     pearson_r: float
 
 
+@dataclass(frozen=True)
+class CoveredMetricResult:
+    metrics: MetricResult
+    valid_count: int
+    total_count: int
+
+    @property
+    def coverage(self) -> float:
+        return self.valid_count / self.total_count if self.total_count else 0.0
+
+
 def calculate_metrics(y_true, y_pred) -> MetricResult:
     true = np.asarray(y_true, dtype=float)
     predicted = np.asarray(y_pred, dtype=float)
@@ -43,6 +54,23 @@ def calculate_metrics(y_true, y_pred) -> MetricResult:
         bias=float(np.mean(errors)),
         max_abs_error=float(np.max(np.abs(errors))),
         pearson_r=pearson_r,
+    )
+
+
+def calculate_covered_metrics(y_true, y_pred) -> CoveredMetricResult:
+    true = np.asarray(y_true, dtype=float)
+    predicted = np.asarray(y_pred, dtype=float)
+    if true.ndim != 1 or predicted.ndim != 1 or true.shape != predicted.shape:
+        raise ValueError("Covered metric inputs must be matching one-dimensional arrays.")
+    finite = np.isfinite(true) & np.isfinite(predicted)
+    valid_count = int(finite.sum())
+    if valid_count == 0:
+        nan_metrics = MetricResult(*(float("nan"),) * 5)
+        return CoveredMetricResult(nan_metrics, 0, int(true.size))
+    return CoveredMetricResult(
+        calculate_metrics(true[finite], predicted[finite]),
+        valid_count,
+        int(true.size),
     )
 
 

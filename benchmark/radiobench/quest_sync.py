@@ -3,12 +3,13 @@ from pathlib import Path
 import subprocess
 
 
-def sync_rf_csv_from_quest(
+def sync_file_from_quest(
     adb_path: str | Path,
     package_name: str,
+    file_name: str,
     destination: str | Path,
 ) -> Path:
-    """Atomically replace destination with the latest Quest persistent-data CSV."""
+    """Atomically replace destination with a Quest persistent-data export."""
     adb = Path(adb_path).expanduser()
     if not adb.is_file():
         raise FileNotFoundError(f"ADB executable does not exist: {adb}")
@@ -18,7 +19,9 @@ def sync_rf_csv_from_quest(
     target = Path(destination)
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(target.name + ".quest-download.tmp")
-    remote = f"/sdcard/Android/data/{package_name}/files/rf_trajectory_log.csv"
+    if not file_name or Path(file_name).name != file_name:
+        raise ValueError("Quest sync file_name must be a plain file name.")
+    remote = f"/sdcard/Android/data/{package_name}/files/{file_name}"
 
     state = subprocess.run(
         [str(adb), "get-state"],
@@ -39,7 +42,7 @@ def sync_rf_csv_from_quest(
         )
         if pull.returncode != 0 or not temporary.is_file():
             detail = pull.stderr.strip() or pull.stdout.strip() or "unknown ADB error"
-            raise RuntimeError(f"Could not pull the Quest RF CSV: {detail}")
+            raise RuntimeError(f"Could not pull Quest file {file_name}: {detail}")
         if temporary.stat().st_size == 0:
             raise RuntimeError("The RF CSV pulled from the Quest is empty.")
         os.replace(temporary, target)
@@ -47,3 +50,13 @@ def sync_rf_csv_from_quest(
         temporary.unlink(missing_ok=True)
 
     return target
+
+
+def sync_rf_csv_from_quest(
+    adb_path: str | Path,
+    package_name: str,
+    destination: str | Path,
+) -> Path:
+    return sync_file_from_quest(
+        adb_path, package_name, "rf_trajectory_log.csv", destination
+    )
