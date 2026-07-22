@@ -7,7 +7,7 @@ data:
   target_bssid: null
 
 quest_sync:
-  enabled: true
+  enabled: false
   adb_path: "C:/Program Files/Unity/Hub/Editor/6000.4.10f1/Editor/Data/PlaybackEngines/AndroidPlayer/SDK/platform-tools/adb.exe"
   package_name: "com.DefaultCompany.RadioTwin_Quest_DataCollector"
 
@@ -30,12 +30,62 @@ simple_rt:
     min: 0.5
     max: 6.0
     grid_points: 200
+  full:
+    enabled: true
+    dominant_planes_k: 10
+    plane_normal_angle_tolerance_deg: 10
+    plane_offset_tolerance_m: 0.10
+    point_tolerance_m: 0.08
+    dedup_tolerance_m: 0.05
+    reflections:
+      enable_one_bounce: true
+      enable_two_bounce: true
+    diffraction:
+      enabled: true
+      max_edges: 30
+      minimum_edge_length_m: 0.08
+      minimum_dihedral_deg: 25
+    path_limits:
+      max_one_bounce_per_rx: 20
+      max_two_bounce_per_rx: 30
+      max_diffraction_per_rx: 20
+    calibration:
+      optimizer: "adam"
+      learning_rate: 0.02
+      epochs: 1000
+      random_state: 42
+      n_min: 0.5
+      n_max: 6.0
+      n_init: 2.0
+      reflection_min: 0.01
+      reflection_max: 0.99
+      reflection_init: 0.6
+      diffraction_loss_min_db: 0.0
+      diffraction_loss_max_db: 40.0
+      diffraction_loss_init_db: 10.0
+
+sionna_rt:
+  # Optional heavy offline backend. Enable after installing `sionna-rt`.
+  enabled: true
+  calibration_max_points: 100
+  no_path_gain_db: -200.0
+  seed: 42
+  samples_per_src: 1000000
+  progress: true
+  cache_dir: "benchmark/.sionna_cache"
+  search:
+    relative_permittivity: [1.5, 12.0]
+    conductivity: [0.0001, 5.0]
+    coarse_epsilon_points: 6
+    coarse_sigma_points: 6
+    refinement_rounds: 1
+    refinement_points: 5
 
 radiomap:
   eval_height_mode: "median_measurement"
   # Set a number to explicitly override the automatic median measurement height.
   eval_height_m: null
-  grid_resolution_m: 0.10
+  grid_resolution_m: 1.0
   bounds_padding_m: 0.20
   vmin_dbm: -90
   vmax_dbm: -30

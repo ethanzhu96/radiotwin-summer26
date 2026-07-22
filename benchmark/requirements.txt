@@ -5,3 +5,6 @@ PyYAML
 matplotlib
 trimesh
 rtree
+scipy
+torch
+# Optional Sionna backend (install separately): pip install sionna-rt

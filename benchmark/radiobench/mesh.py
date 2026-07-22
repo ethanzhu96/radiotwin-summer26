@@ -1,7 +1,25 @@
 from pathlib import Path
+from dataclasses import dataclass
 
 import numpy as np
 import trimesh
+
+
+@dataclass(frozen=True)
+class DominantPlane:
+    plane_id: int
+    normal: np.ndarray
+    offset: float
+    area_m2: float
+    triangle_indices: np.ndarray
+
+
+@dataclass(frozen=True)
+class WedgeEdge:
+    edge_id: int
+    point_a: np.ndarray
+    point_b: np.ndarray
+    length_m: float
 
 
 class SceneMesh:
@@ -114,3 +132,109 @@ class SceneMesh:
             hit_distances = np.linalg.norm(locations - origins[ray_indices], axis=1)
             blocked[valid_indices[ray_indices]] = hit_distances < query_lengths[ray_indices]
         return blocked
+
+    @staticmethod
+    def _canonical_plane(normal: np.ndarray, point: np.ndarray) -> tuple[np.ndarray, float]:
+        unit = normal / np.linalg.norm(normal)
+        significant = np.flatnonzero(np.abs(unit) > 1e-8)
+        if significant.size and unit[significant[0]] < 0:
+            unit = -unit
+        return unit, float(np.dot(unit, point))
+
+    def extract_dominant_planes(
+        self,
+        top_k: int = 10,
+        normal_angle_tolerance_deg: float = 10.0,
+        offset_tolerance_m: float = 0.10,
+    ) -> list[DominantPlane]:
+        if top_k < 1:
+            raise ValueError("dominant_planes_k must be positive.")
+        triangles = self.mesh.triangles
+        normals = self.mesh.face_normals
+        areas = self.mesh.area_faces
+        order = np.argsort(areas)[::-1]
+        clusters: list[dict] = []
+        cosine_tolerance = np.cos(np.deg2rad(normal_angle_tolerance_deg))
+        for face_index in order:
+            area = float(areas[face_index])
+            if area <= 1e-10:
+                continue
+            normal, offset = self._canonical_plane(
+                normals[face_index], triangles[face_index, 0]
+            )
+            match = None
+            for cluster in clusters:
+                if (
+                    float(np.dot(normal, cluster["normal"])) >= cosine_tolerance
+                    and abs(offset - cluster["offset"]) <= offset_tolerance_m
+                ):
+                    match = cluster
+                    break
+            if match is None:
+                clusters.append(
+                    {"normal": normal.copy(), "offset": offset, "area": area,
+                     "faces": [int(face_index)]}
+                )
+            else:
+                old_area = match["area"]
+                total_area = old_area + area
+                averaged = match["normal"] * old_area + normal * area
+                match["normal"] = averaged / np.linalg.norm(averaged)
+                match["offset"] = (match["offset"] * old_area + offset * area) / total_area
+                match["area"] = total_area
+                match["faces"].append(int(face_index))
+        clusters.sort(key=lambda cluster: cluster["area"], reverse=True)
+        return [
+            DominantPlane(
+                plane_id=index,
+                normal=np.asarray(cluster["normal"], dtype=float),
+                offset=float(cluster["offset"]),
+                area_m2=float(cluster["area"]),
+                triangle_indices=np.asarray(cluster["faces"], dtype=int),
+            )
+            for index, cluster in enumerate(clusters[:top_k])
+        ]
+
+    def point_on_plane_surface(
+        self, point, plane: DominantPlane, tolerance_m: float
+    ) -> bool:
+        candidate = np.asarray(point, dtype=float)
+        triangles = self.mesh.triangles[plane.triangle_indices]
+        repeated = np.repeat(candidate.reshape(1, 3), len(triangles), axis=0)
+        closest = trimesh.triangles.closest_point(triangles, repeated)
+        return bool(np.min(np.linalg.norm(closest - repeated, axis=1)) <= tolerance_m)
+
+    def extract_wedge_edges(
+        self,
+        maximum_edges: int = 30,
+        minimum_edge_length_m: float = 0.08,
+        minimum_dihedral_deg: float = 25.0,
+        include_boundary_edges: bool = True,
+    ) -> list[WedgeEdge]:
+        vertices = np.asarray(self.mesh.vertices)
+        faces = np.asarray(self.mesh.faces)
+        normals = np.asarray(self.mesh.face_normals)
+        edge_faces: dict[tuple[int, int], list[int]] = {}
+        for face_index, face in enumerate(faces):
+            for first, second in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
+                key = tuple(sorted((int(first), int(second))))
+                edge_faces.setdefault(key, []).append(face_index)
+        candidates: list[tuple[float, np.ndarray, np.ndarray]] = []
+        for (first, second), adjacent in edge_faces.items():
+            point_a = vertices[first]
+            point_b = vertices[second]
+            length = float(np.linalg.norm(point_b - point_a))
+            if length < minimum_edge_length_m:
+                continue
+            valid = include_boundary_edges and len(adjacent) == 1
+            if len(adjacent) >= 2:
+                cosine = np.clip(abs(float(np.dot(normals[adjacent[0]], normals[adjacent[1]]))), 0, 1)
+                angle = np.rad2deg(np.arccos(cosine))
+                valid = angle >= minimum_dihedral_deg
+            if valid:
+                candidates.append((length, point_a.copy(), point_b.copy()))
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        return [
+            WedgeEdge(index, point_a, point_b, length)
+            for index, (length, point_a, point_b) in enumerate(candidates[:maximum_edges])
+        ]

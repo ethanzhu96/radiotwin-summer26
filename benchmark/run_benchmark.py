@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
 import sys
+import time
 import warnings
 
 
@@ -28,7 +29,13 @@ try:
         format_metrics,
     )
     from radiobench.models.gp import GaussianProcessRadioModel
-    from radiobench.models.simple_rt import SimpleRTModel, save_los_diagnostic
+    from radiobench.models.simple_rt import (
+        FullSimpleRTModel,
+        SimpleRTModel,
+        save_los_diagnostic,
+        save_path_type_map,
+    )
+    from radiobench.models.sionna_rt import SIONNA_AVAILABLE, SionnaRTModel
     from radiobench.quest_sync import sync_file_from_quest
     from radiobench.radiomap import generate_radio_map
 except ModuleNotFoundError as error:
@@ -136,7 +143,24 @@ def load_metadata_room_uuid(path: Path) -> str | None:
     return str(room_uuid).strip() if room_uuid else None
 
 
-def print_comparison(gp_metrics, simple_metrics) -> None:
+def dataset_frequency_hz(dataset) -> float:
+    values = dataset.metadata.get("frequency_mhz", [])
+    try:
+        frequencies_mhz = sorted({float(value) for value in values})
+    except (TypeError, ValueError) as error:
+        raise ValueError("Dataset frequency_mhz values must be numeric.") from error
+    if len(frequencies_mhz) != 1:
+        raise ValueError(
+            "Sionna v1 requires exactly one carrier frequency; found "
+            f"{frequencies_mhz or 'none'}."
+        )
+    frequency_hz = frequencies_mhz[0] * 1e6
+    if not np.isfinite(frequency_hz) or frequency_hz <= 0:
+        raise ValueError("Dataset carrier frequency must be positive and finite.")
+    return frequency_hz
+
+
+def print_comparison(gp_metrics, simple_metrics=None, full_metrics=None, sionna_metrics=None) -> None:
     print("\n" + "=" * 86)
     print("MODEL COMPARISON - TEST SET")
     print("=" * 86)
@@ -147,14 +171,40 @@ def print_comparison(gp_metrics, simple_metrics) -> None:
         f"{gp_metrics.bias:7.2f} {gp_metrics.max_abs_error:8.2f} "
         f"{gp_metrics.pearson_r:6.3f}   100.0%"
     )
-    metrics = simple_metrics.metrics
-    print(
-        f"{'Simple RT (LOS-only)':25} {metrics.rmse:6.2f} {metrics.mae:6.2f} "
-        f"{metrics.bias:7.2f} {metrics.max_abs_error:8.2f} "
-        f"{metrics.pearson_r:6.3f} {simple_metrics.coverage * 100:7.1f}%"
-    )
-    print("Simple RT metrics are on valid LOS-covered test samples only.")
+    if simple_metrics is not None:
+        metrics = simple_metrics.metrics
+        print(
+            f"{'Simple RT (LOS-only)':25} {metrics.rmse:6.2f} {metrics.mae:6.2f} "
+            f"{metrics.bias:7.2f} {metrics.max_abs_error:8.2f} "
+            f"{metrics.pearson_r:6.3f} {simple_metrics.coverage * 100:7.1f}%"
+        )
+    if full_metrics is not None:
+        metrics = full_metrics.metrics
+        print(
+            f"{'Simple RT (Full)':25} {metrics.rmse:6.2f} {metrics.mae:6.2f} "
+            f"{metrics.bias:7.2f} {metrics.max_abs_error:8.2f} "
+            f"{metrics.pearson_r:6.3f} {full_metrics.coverage * 100:7.1f}%"
+        )
+    if sionna_metrics is not None:
+        print(
+            f"{'Sionna RT':25} {sionna_metrics.rmse:6.2f} {sionna_metrics.mae:6.2f} "
+            f"{sionna_metrics.bias:7.2f} {sionna_metrics.max_abs_error:8.2f} "
+            f"{sionna_metrics.pearson_r:6.3f}   100.0%"
+        )
+    print("RT metrics are calculated on finite covered test predictions only.")
     print("=" * 86)
+
+
+def print_rt_metric_detail(label: str, train_result, test_result) -> None:
+    print(f"\n{label} metrics (finite covered predictions only):")
+    for split_label, result in (("TRAIN", train_result), ("TEST", test_result)):
+        metrics = result.metrics
+        print(
+            f"  {split_label}: RMSE={metrics.rmse:.2f}, MAE={metrics.mae:.2f}, "
+            f"bias={metrics.bias:.2f}, max={metrics.max_abs_error:.2f}, "
+            f"r={metrics.pearson_r:.3f}, coverage={result.coverage * 100:.1f}% "
+            f"({result.valid_count}/{result.total_count})"
+        )
 
 
 def main() -> int:
@@ -163,6 +213,7 @@ def main() -> int:
     split_config = config.get("split", {})
     gp_config = config.get("gp", {})
     simple_rt_config = config.get("simple_rt", {})
+    sionna_config = config.get("sionna_rt", {})
     sync_config = config.get("quest_sync", {})
     radiomap_config = config.get("radiomap", {})
     if not data_config.get("rf_csv"):
@@ -184,7 +235,7 @@ def main() -> int:
                 "quest_sync.enabled requires quest_sync.adb_path and package_name."
             )
         sync_targets = [("rf_trajectory_log.csv", rf_csv_path)]
-        if simple_rt_config.get("enabled", True):
+        if simple_rt_config.get("enabled", True) or sionna_config.get("enabled", False):
             sync_targets.extend(
                 [
                     ("tx_anchor.json", tx_anchor_path),
@@ -254,8 +305,14 @@ def main() -> int:
     simple_model = None
     simple_test_metrics = None
     simple_all_los = None
+    full_model = None
+    full_test_metrics = None
+    full_geometry_seconds = 0.0
+    full_calibration_seconds = 0.0
     diagnostic_path = None
-    if simple_rt_config.get("enabled", True):
+    tx_metadata = None
+    metadata_room_uuid = None
+    if simple_rt_config.get("enabled", True) or sionna_config.get("enabled", False):
         tx_metadata = load_tx_anchor(tx_anchor_path)
         metadata_room_uuid = load_metadata_room_uuid(metadata_path)
         if (
@@ -267,6 +324,7 @@ def main() -> int:
                 "TX room UUID does not match RF dataset metadata room UUID. "
                 "Re-export a consistent TX/trajectory/mesh dataset."
             )
+    if simple_rt_config.get("enabled", True):
         scene_mesh = SceneMesh(
             mesh_path,
             ray_epsilon_m=float(simple_rt_config.get("ray_epsilon_m", 0.01)),
@@ -337,7 +395,124 @@ def main() -> int:
             tx,
         )
         print(f"  diagnostic PNG:       {diagnostic_path}")
-        print_comparison(test_metrics, simple_test_metrics)
+        print_rt_metric_detail(
+            "Simple RT (LOS-only)", simple_train_metrics, simple_test_metrics
+        )
+        full_config = simple_rt_config.get("full", {})
+        if full_config.get("enabled", True):
+            full_model = FullSimpleRTModel(simple_rt_config)
+            full_start = time.perf_counter()
+            full_model._set_context({"mesh": scene_mesh, "tx": tx})
+            geometry_start = time.perf_counter()
+            full_model.enumerate_paths(split.train_positions, "training geometry")
+            full_model.enumerate_paths(split.test_positions, "test geometry")
+            full_geometry_seconds = time.perf_counter() - geometry_start
+            calibration_start = time.perf_counter()
+            full_model.fit(
+                split.train_positions,
+                split.train_rssi,
+                ctx={"mesh": scene_mesh, "tx": tx, "cfg": simple_rt_config},
+            )
+            full_calibration_seconds = time.perf_counter() - calibration_start
+            full_train_predictions = full_model.predict(split.train_positions)
+            full_test_predictions = full_model.predict(split.test_positions)
+            full_train_metrics = calculate_covered_metrics(
+                split.train_rssi, full_train_predictions
+            )
+            full_test_metrics = calculate_covered_metrics(
+                split.test_rssi, full_test_predictions
+            )
+            train_stats = full_model.path_statistics(split.train_positions)
+            test_stats = full_model.path_statistics(split.test_positions)
+            print("\nDominant planes:")
+            print(f"  extracted: {len(full_model.planes)}")
+            print(
+                "  top areas m^2: "
+                + ", ".join(f"{plane.area_m2:.2f}" for plane in full_model.planes)
+            )
+            print("\nFull Simple RT path geometry summary:")
+            for label, stats in (("TRAIN", train_stats), ("TEST", test_stats)):
+                print(f"  {label}")
+                print(f"    LOS paths:          {stats['los']}")
+                print(f"    1-bounce paths:     {stats['reflection_1']}")
+                print(f"    2-bounce paths:     {stats['reflection_2']}")
+                print(f"    diffraction paths:  {stats['diffraction']}")
+                print(f"    covered/no-path RX: {stats['covered_rx']}/{stats['no_path_rx']}")
+                print(
+                    f"    avg/max paths RX:   {stats['average_paths_per_rx']:.2f}/"
+                    f"{stats['maximum_paths_per_rx']}"
+                )
+            if train_stats["reflection_1"] + train_stats["reflection_2"] == 0:
+                warnings.warn("Full Simple RT found zero reflection paths.", stacklevel=2)
+            if train_stats["diffraction"] == 0:
+                warnings.warn("Full Simple RT found zero diffraction paths.", stacklevel=2)
+            reflection_loss = -20.0 * np.log10(full_model.reflection_coefficient)
+            print("\nFitted Full Simple RT parameters:")
+            print(f"  optimizer:                  Torch Adam")
+            print(f"  epochs / learning rate:     {full_model.epochs} / {full_model.learning_rate:.4f}")
+            print(f"  path-loss exponent n:       {full_model.path_loss_exponent:.3f}")
+            print(f"  reflection coefficient R:   {full_model.reflection_coefficient:.3f}")
+            print(f"  reflection loss per bounce: {reflection_loss:.3f} dB")
+            print(f"  diffraction loss:           {full_model.diffraction_loss_db:.3f} dB")
+            print(f"  global offset:              {full_model.tx_offset_dbm:.3f} dBm")
+            print(f"  final training MSE:         {full_model.final_training_loss:.3f} dB^2")
+            print(f"  train coverage:             {full_train_metrics.coverage * 100:.1f}%")
+            print(f"  test coverage:              {full_test_metrics.coverage * 100:.1f}%")
+            print(f"  geometry enumeration:       {full_geometry_seconds:.3f} s")
+            print(f"  calibration:                {full_calibration_seconds:.3f} s")
+            print_rt_metric_detail(
+                "Simple RT (Full)", full_train_metrics, full_test_metrics
+            )
+            _ = full_start
+    sionna_model = None
+    sionna_test_metrics = None
+    if sionna_config.get("enabled", False):
+        if not SIONNA_AVAILABLE:
+            print(
+                "\nSionna RT: SKIPPED (optional dependency unavailable). "
+                "Install with: pip install sionna-rt"
+            )
+        else:
+            output_dir = resolve_data_path(
+                radiomap_config.get("output_dir", "benchmark/outputs")
+            )
+            sionna_model = SionnaRTModel(sionna_config)
+            sionna_started = time.perf_counter()
+            sionna_model.fit(
+                split.train_positions,
+                split.train_rssi,
+                ctx={
+                    "tx": tx_metadata.position,
+                    "mesh_path": mesh_path,
+                    "frequency_hz": dataset_frequency_hz(dataset),
+                    "cache_dir": resolve_data_path(
+                        sionna_config.get("cache_dir", "benchmark/.sionna_cache")
+                    ),
+                    "output_dir": output_dir,
+                },
+            )
+            sionna_train_metrics = calculate_metrics(
+                split.train_rssi, sionna_model.predict(split.train_positions)
+            )
+            sionna_test_metrics = calculate_metrics(
+                split.test_rssi, sionna_model.predict(split.test_positions)
+            )
+            print("\nSionna RT effective-material calibration:")
+            print(f"  frequency:             {sionna_model.frequency_hz / 1e9:.6f} GHz")
+            print(f"  relative permittivity: {sionna_model.best_relative_permittivity:.6g}")
+            print(f"  conductivity:          {sionna_model.best_conductivity:.6g} S/m")
+            print(f"  global offset:         {sionna_model.offset_db:.3f} dB")
+            print(f"  calibration points:    {sionna_model.num_calibration_points}/{sionna_model.num_training_points}")
+            print(f"  calibration no-path:   {sionna_model.num_no_path_calibration_points}")
+            print(f"  elapsed:               {time.perf_counter() - sionna_started:.3f} s")
+            print(f"  artifact:              {sionna_model.artifact_path}")
+            print("  interpretation: one effective global material, not measured wall composition")
+            print("\n" + format_metrics("TRAIN", sionna_train_metrics))
+            print("\n" + format_metrics("TEST", sionna_test_metrics))
+
+    print_comparison(
+        test_metrics, simple_test_metrics, full_test_metrics, sionna_test_metrics
+    )
 
     map_height, y_min, y_median, y_max = resolve_radiomap_height(
         dataset, radiomap_config
@@ -427,6 +602,82 @@ def main() -> int:
         print(f"  NPZ:          {simple_map_result.npz_path}")
         if simple_map_result.debug_png_path is not None:
             print(f"  Debug PNG:    {simple_map_result.debug_png_path}")
+
+    if full_model is not None:
+        full_map_start = time.perf_counter()
+        full_map_result = generate_radio_map(
+            model=full_model,
+            measurement_positions=dataset.positions,
+            train_indices=split.train_indices,
+            test_indices=split.test_indices,
+            height_m=map_height,
+            grid_resolution_m=float(radiomap_config.get("grid_resolution_m", 0.10)),
+            bounds_padding_m=float(radiomap_config.get("bounds_padding_m", 0.20)),
+            model_name=full_model.name,
+            output_dir=output_dir,
+            vmin_dbm=float(radiomap_config.get("vmin_dbm", -90)),
+            vmax_dbm=float(radiomap_config.get("vmax_dbm", -30)),
+            save_debug_autoscaled=bool(
+                radiomap_config.get("save_debug_autoscaled", False)
+            ),
+            allow_missing_predictions=True,
+        )
+        full_map_seconds = time.perf_counter() - full_map_start
+        x_grid = full_map_result.x_grid
+        z_grid = full_map_result.z_grid
+        grid_positions = np.column_stack(
+            (
+                x_grid.ravel(),
+                np.full(x_grid.size, map_height),
+                z_grid.ravel(),
+            )
+        )
+        path_type_codes = full_model.mechanism_codes(grid_positions)
+        path_type_path = save_path_type_map(
+            output_dir / f"simple_rt_path_types_h{map_height:.2f}m.png",
+            x_grid,
+            z_grid,
+            path_type_codes,
+        )
+        finite_full_map = full_map_result.rssi_dbm[
+            np.isfinite(full_map_result.rssi_dbm)
+        ]
+        print("\nFull Simple RT radio map:")
+        print(f"  Height:       {full_map_result.height_m:.2f} m")
+        print(f"  Grid:         {full_map_result.shape[1]} x {full_map_result.shape[0]}")
+        print(
+            f"  Coverage:     {finite_full_map.size}/{full_map_result.rssi_dbm.size} "
+            f"({finite_full_map.size / full_map_result.rssi_dbm.size * 100:.1f}%)"
+        )
+        print(f"  PNG:          {full_map_result.png_path}")
+        print(f"  NPZ:          {full_map_result.npz_path}")
+        if full_map_result.debug_png_path is not None:
+            print(f"  Debug PNG:    {full_map_result.debug_png_path}")
+        print(f"  Path types:   {path_type_path}")
+        print(f"  map geometry/render time: {full_map_seconds:.3f} s")
+    if sionna_model is not None:
+        sionna_map_start = time.perf_counter()
+        sionna_map_result = generate_radio_map(
+            model=sionna_model,
+            measurement_positions=dataset.positions,
+            train_indices=split.train_indices,
+            test_indices=split.test_indices,
+            height_m=map_height,
+            grid_resolution_m=float(radiomap_config.get("grid_resolution_m", 0.10)),
+            bounds_padding_m=float(radiomap_config.get("bounds_padding_m", 0.20)),
+            model_name=sionna_model.name,
+            output_dir=output_dir,
+            vmin_dbm=float(radiomap_config.get("vmin_dbm", -90)),
+            vmax_dbm=float(radiomap_config.get("vmax_dbm", -30)),
+            save_debug_autoscaled=bool(
+                radiomap_config.get("save_debug_autoscaled", False)
+            ),
+        )
+        print("\nSionna RT radio map:")
+        print(f"  Grid:         {sionna_map_result.shape[1]} x {sionna_map_result.shape[0]}")
+        print(f"  PNG:          {sionna_map_result.png_path}")
+        print(f"  NPZ:          {sionna_map_result.npz_path}")
+        print(f"  trace/render: {time.perf_counter() - sionna_map_start:.3f} s")
     print("=" * 72)
     return 0
 
